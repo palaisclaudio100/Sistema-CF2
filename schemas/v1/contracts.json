@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "cf2://schemas/v1/contracts.json",
+  "version": "1.0.0",
+  "common": {"type":"object","required":["id","type","status","created_at","updated_at","basis_ref"],"properties":{"id":{"type":"string","pattern":"^[A-Z][A-Z0-9_:-]+$"},"type":{"type":"string"},"status":{"type":"string"},"created_at":{"type":"string","format":"date-time"},"updated_at":{"type":"string","format":"date-time"},"basis_ref":{"type":"array","items":{"type":"string"},"minItems":1},"superseded_by":{"type":"string"}},"additionalProperties":true},
+  "types": {
+    "ENTITY":{"required":["entity_kind","canonical_name","aliases"],"properties":{"type":{"const":"ENTITY"},"entity_kind":{"type":"string"},"canonical_name":{"type":"string","minLength":1},"aliases":{"type":"array","items":{"type":"string"}}}},
+    "SURFACE":{"required":["platform","surface_kind","external_id","owner_or_subject_id"],"properties":{"type":{"const":"SURFACE"},"platform":{"type":"string"},"surface_kind":{"type":"string"},"external_id":{"type":"string","minLength":1},"owner_or_subject_id":{"type":"string"},"url":{"type":"string"}}},
+    "TASK":{"required":["action","state","responsible_role","related_ids"],"properties":{"type":{"const":"TASK"},"action":{"type":"string"},"state":{"enum":["OPEN","READY","IN_PROGRESS","BLOCKED","DONE","CANCELLED"]},"responsible_role":{"type":"string"},"related_ids":{"type":"array","items":{"type":"string"}},"due_at":{"type":"string","format":"date-time"},"closure_ref":{"type":"string"}}},
+    "DECISION":{"required":["subject_id","decision_key","value","authority","effective_at","source_ref"],"properties":{"type":{"const":"DECISION"},"subject_id":{"type":"string"},"decision_key":{"type":"string"},"value":{},"authority":{"enum":["CLAUDIO_DIRECT","CLAUDIO_PERSISTED","DGA_DELEGATED","ROLE_DELEGATED"]},"effective_at":{"type":"string","format":"date-time"},"supersedes":{"type":"string"},"source_ref":{"type":"string"}}},
+    "VERIFICATION":{"required":["subject_id","attribute","value","class","verified_at","verified_by","evidence_ref"],"properties":{"type":{"const":"VERIFICATION"},"subject_id":{"type":"string"},"attribute":{"type":"string"},"value":{},"class":{"enum":["FIJO","VOLATIL","CONDICIONAL"]},"verified_at":{"type":"string","format":"date-time"},"verified_by":{"type":"string"},"valid_until":{"type":"string","format":"date-time"},"invalidation_rule":{"type":"string"},"evidence_ref":{"type":"string"}}},
+    "RELATION":{"required":["from_id","relation_type","to_id","effective_at"],"properties":{"type":{"const":"RELATION"},"from_id":{"type":"string"},"relation_type":{"enum":["BELONGS_TO","REPRESENTS","OPERATED_BY","COLLABORATES_WITH","PROVIDES_SERVICE_TO","IS_VERSION_OF"]},"to_id":{"type":"string"},"effective_at":{"type":"string","format":"date-time"}}}
+  },
+  "invariants": ["task_done_requires_closure_ref","volatile_requires_valid_until","conditional_requires_invalidation_rule","decision_current_unique_or_conflict","views_non_authoritative","no_destructive_delete"]
+}

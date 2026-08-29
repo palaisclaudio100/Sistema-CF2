@@ -1,0 +1,22 @@
+{
+  "version":"1.0.0",
+  "cases":["Independiza","Mitxoda","Ataraxia","YouTube_FIJO","Somos_mas","Control_ABC","Supervisor_lifecycle","Polling_empty","Indice_mente"],
+  "objects":[
+    {"id":"ENTITY:INDEPENDIZA","type":"ENTITY","status":"CURRENT","created_at":"2026-08-29T10:00:00Z","updated_at":"2026-08-29T10:00:00Z","basis_ref":["evidence:independiza"],"entity_kind":"PROVIDER","canonical_name":"Independiza","aliases":["Independiza Music"]},
+    {"id":"ENTITY:MITXODA","type":"ENTITY","status":"CURRENT","created_at":"2026-08-29T10:00:00Z","updated_at":"2026-08-29T10:00:00Z","basis_ref":["evidence:historic-mitxoda"],"entity_kind":"ARTIST","canonical_name":"Mitxoda","aliases":["MITXODA"]},
+    {"id":"ENTITY:ATARAXIA_MUSIC","type":"ENTITY","status":"UNKNOWN","created_at":"2026-08-29T10:00:00Z","updated_at":"2026-08-29T10:00:00Z","basis_ref":["evidence:ataraxia-mention"],"entity_kind":"CANDIDATE","canonical_name":"Ataraxia Music","aliases":["Ataraxia"]},
+    {"id":"ENTITY:SOMOS_MAS","type":"ENTITY","status":"CURRENT","created_at":"2026-08-29T10:00:00Z","updated_at":"2026-08-29T10:00:00Z","basis_ref":["decision:somos-active"],"entity_kind":"TRACK","canonical_name":"Somos más","aliases":["Somos mas"]},
+    {"id":"ENTITY:LM110","type":"ENTITY","status":"CURRENT","created_at":"2026-08-29T10:00:00Z","updated_at":"2026-08-29T10:00:00Z","basis_ref":["decision:lm110-belongs"],"entity_kind":"PROJECT","canonical_name":"LM110","aliases":[]},
+    {"id":"SURFACE:YOUTUBE:SOMOS_MAS","type":"SURFACE","status":"CURRENT","created_at":"2026-08-29T10:00:00Z","updated_at":"2026-08-29T10:00:00Z","basis_ref":["evidence:yt-ai"],"platform":"YOUTUBE","surface_kind":"VIDEO","external_id":"yt_somos_mas_exact","owner_or_subject_id":"ENTITY:SOMOS_MAS","url":"https://example.invalid/youtube/yt_somos_mas_exact"},
+    {"id":"DECISION:SOMOS:OLD","type":"DECISION","status":"SUPERSEDED","created_at":"2026-08-29T10:00:00Z","updated_at":"2026-08-29T10:00:00Z","basis_ref":["source:old"],"superseded_by":"DECISION:SOMOS:CURRENT","subject_id":"ENTITY:SOMOS_MAS","decision_key":"PROJECT_STATUS","value":"FROZEN","authority":"DGA_DELEGATED","effective_at":"2026-08-20T10:00:00Z","source_ref":"source:old"},
+    {"id":"DECISION:SOMOS:CURRENT","type":"DECISION","status":"CURRENT","created_at":"2026-08-29T10:00:00Z","updated_at":"2026-08-29T10:00:00Z","basis_ref":["source:claudio-direct"],"subject_id":"ENTITY:SOMOS_MAS","decision_key":"PROJECT_STATUS","value":"ACTIVE_CONSTRUCTION","authority":"CLAUDIO_DIRECT","effective_at":"2026-08-29T10:00:00Z","supersedes":"DECISION:SOMOS:OLD","source_ref":"source:claudio-direct"},
+    {"id":"VERIFICATION:YT:AI","type":"VERIFICATION","status":"CURRENT","created_at":"2026-08-29T10:00:00Z","updated_at":"2026-08-29T10:00:00Z","basis_ref":["evidence:yt-ai"],"subject_id":"SURFACE:YOUTUBE:SOMOS_MAS","attribute":"AI_USAGE_DISCLOSED","value":"YES","class":"FIJO","verified_at":"2026-08-28T10:00:00Z","verified_by":"GABY_CHAT","evidence_ref":"evidence:yt-ai"},
+    {"id":"RELATION:LM110:SOMOS","type":"RELATION","status":"CURRENT","created_at":"2026-08-29T10:00:00Z","updated_at":"2026-08-29T10:00:00Z","basis_ref":["DECISION:SOMOS:CURRENT"],"from_id":"ENTITY:SOMOS_MAS","relation_type":"BELONGS_TO","to_id":"ENTITY:LM110","effective_at":"2026-08-29T10:00:00Z"},
+    {"id":"TASK:SUPERVISOR:OPEN","type":"TASK","status":"OPEN","created_at":"2026-08-29T10:00:00Z","updated_at":"2026-08-29T10:00:00Z","basis_ref":["command:supervisor"],"action":"ENGINEERING_REVIEW","state":"OPEN","responsible_role":"CODEX_ENGINEERING","related_ids":["ENTITY:SOMOS_MAS"]}
+  ],
+  "commands":[{"command_id":"CMD:SUPERVISOR:1","command_type":"CREATE_TASK","actor_id":"DGA:DIEGO","actor_role":"DGA","issued_at":"2026-08-29T10:00:00Z","idempotency_key":"supervisor-1","payload":{}}],
+  "events":[{"event_id":"EVT:SUPERVISOR:REQUEST","event_type":"REQUESTED","occurred_at":"2026-08-29T10:00:00Z","producer":"DGA","state_version":1}],
+  "jobs":[{"job_id":"JOB:EMPTY:POLL","job_type":"NOOP_ON_EMPTY_EVENT","state":"DONE","attempt":0,"dedupe_key":"empty-event"}],
+  "mappings":[{"artifact_id":"ARTIFACT:DEMO","A_path":"D:/authorized/demo","C_file_id":"C_FILE_ID_EXACT","replication_mode":"MANUAL_TEST_ONLY","byte_preserving":true}],
+  "proofs":[{"artifact_id":"ARTIFACT:DEMO","source_seal_ref":"seal:a","C_file_id":"C_FILE_ID_EXACT","write_result_ref":"write:a","readback_ref":"readback:a","status":"PROVEN","completed_at":"2026-08-29T10:00:00Z"}]
+}

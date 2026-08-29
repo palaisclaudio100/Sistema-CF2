@@ -1,0 +1,14 @@
+{
+  "name": "sistema-cf2",
+  "version": "0.1.0-stage0",
+  "private": true,
+  "description": "CF 2.0 — Etapa 0: contratos y fixtures; sin runtime productivo.",
+  "type": "module",
+  "scripts": {
+    "lint": "node scripts/lint.mjs",
+    "validate": "node scripts/validate-contracts.mjs",
+    "test": "node --test",
+    "check": "npm run lint && npm run validate && npm test"
+  },
+  "engines": { "node": ">=20" }
+}
