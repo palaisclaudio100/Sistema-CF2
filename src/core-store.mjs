@@ -35,7 +35,8 @@ export class CoreStore {
       CREATE TABLE IF NOT EXISTS worker_metrics (metric_key TEXT PRIMARY KEY, metric_value INTEGER NOT NULL, updated_at TEXT NOT NULL);`);
     this.db.exec(`CREATE TABLE IF NOT EXISTS mappings (mapping_id TEXT PRIMARY KEY, artifact_id TEXT NOT NULL, generation TEXT NOT NULL, A_path TEXT NOT NULL, C_file_id TEXT NOT NULL, environment TEXT NOT NULL, status TEXT NOT NULL, body TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(artifact_id,generation));
       CREATE TABLE IF NOT EXISTS replication_attempts (attempt_id TEXT PRIMARY KEY, mapping_id TEXT NOT NULL, artifact_id TEXT NOT NULL, generation TEXT NOT NULL, C_file_id TEXT NOT NULL, result TEXT NOT NULL, reason_code TEXT NOT NULL, body TEXT NOT NULL, created_at TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS replication_proofs (proof_id TEXT PRIMARY KEY, mapping_id TEXT NOT NULL, artifact_id TEXT NOT NULL, generation TEXT NOT NULL, C_file_id TEXT NOT NULL, result TEXT NOT NULL, reason_code TEXT NOT NULL, body TEXT NOT NULL, created_at TEXT NOT NULL);`);
+      CREATE TABLE IF NOT EXISTS replication_proofs (proof_id TEXT PRIMARY KEY, mapping_id TEXT NOT NULL, artifact_id TEXT NOT NULL, generation TEXT NOT NULL, C_file_id TEXT NOT NULL, result TEXT NOT NULL, reason_code TEXT NOT NULL, body TEXT NOT NULL, created_at TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS access_audit (request_id TEXT PRIMARY KEY, timestamp TEXT NOT NULL, actor_id TEXT NOT NULL, role TEXT NOT NULL, operation TEXT NOT NULL, authorized INTEGER NOT NULL, reason_code TEXT NOT NULL, detail TEXT NOT NULL);`);
     this.#ensureColumn('outbox','status',"TEXT NOT NULL DEFAULT 'PENDING'");
     if (!this.db.prepare('SELECT value FROM meta WHERE key=?').get('state_version')) this.db.prepare('INSERT INTO meta(key,value) VALUES (?,?)').run('state_version','0');
   }
@@ -155,6 +156,8 @@ export class CoreStore {
   saveReplicationProof(proof) { const fields=['proof_id','mapping_id','artifact_id','generation','C_file_id','result','reason_code','created_at']; for (const field of fields) if (!(field in proof)) throw new CF2Error('MISSING_EVIDENCE'); this.db.prepare('INSERT OR IGNORE INTO replication_proofs VALUES(?,?,?,?,?,?,?,?,?)').run(proof.proof_id,proof.mapping_id,proof.artifact_id,proof.generation,proof.C_file_id,proof.result,proof.reason_code,json(proof),proof.created_at); const row=this.db.prepare('SELECT body FROM replication_proofs WHERE proof_id=?').get(proof.proof_id); return parse(row.body); }
   listReplicationProofs() { return this.db.prepare('SELECT body FROM replication_proofs ORDER BY created_at,proof_id').all().map(row=>parse(row.body)); }
   listReplicationAttempts() { return this.db.prepare('SELECT body FROM replication_attempts ORDER BY created_at,attempt_id').all().map(row=>parse(row.body)); }
+  recordAccessAttempt(entry) { this.db.prepare('INSERT OR REPLACE INTO access_audit VALUES(?,?,?,?,?,?,?,?)').run(entry.request_id,entry.timestamp,entry.actor_id,entry.role,entry.operation,entry.authorized?1:0,entry.reason_code,json(entry.detail ?? {})); }
+  getAccessAudit() { return this.db.prepare('SELECT * FROM access_audit ORDER BY timestamp,request_id').all().map(row=>({...row,authorized:Boolean(row.authorized),detail:parse(row.detail)})); }
   listJobs() { return this.db.prepare('SELECT * FROM jobs ORDER BY job_id').all().map(job=>({...job,payload:parse(job.payload),result:job.result ? parse(job.result) : null})); }
   getJobAttempts(job_id) { return this.db.prepare('SELECT * FROM job_attempts WHERE job_id=? ORDER BY occurred_at, attempt_id').all(job_id).map(item=>({...item,detail:parse(item.detail)})); }
   recordWorkerMetric(metric_key, at=now()) { this.#metric(metric_key,at); }
