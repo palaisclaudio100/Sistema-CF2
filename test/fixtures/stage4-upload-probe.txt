@@ -1,0 +1,4 @@
+CF2_STAGE4_STAGING_ONLY
+artifact=ARTIFACT:CF2:STAGE4:PROBE
+generation=GEN:1
+payload=byte-preserving-test-v1
