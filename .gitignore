@@ -3,3 +3,4 @@ coverage/
 .env
 *.local
 dev/*.db
+dev/shadow/
