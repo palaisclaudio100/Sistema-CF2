@@ -94,7 +94,47 @@ export class CoreStore {
     return {status:'UNKNOWN',reason_code:'UNKNOWN'};
   }
   resolveEntity(nameOrId) { const direct=this.#object(nameOrId); if (direct?.type==='ENTITY') return {status:'EXACT',entity:direct}; const rows=this.db.prepare('SELECT entity_id FROM aliases WHERE alias=?').all(normalize(nameOrId)); if (!rows.length) return {status:'UNKNOWN',reason_code:'ENTITY_NEW'}; if (rows.length>1) return {status:'AMBIGUOUS',reason_code:'AMBIGUOUS_ALIAS',candidate_ids:rows.map(x=>x.entity_id)}; return {status:'UNIQUE',entity:this.#object(rows[0].entity_id)}; }
-  regenerateEntityView(entityId) { const entity=this.#object(entityId); if (!entity) throw new CF2Error('UNKNOWN'); const version=this.#version(); const body={entity,generated_from_state_version:version}; this.db.prepare('INSERT OR REPLACE INTO views VALUES(?,?,?,?)').run(`ENTITY:${entityId}`,json(body),version,now()); return body; }
+  resolveSurface({id,platform,external_id}) { if (id) { const object=this.#object(id); return object?.type==='SURFACE' ? {status:'EXACT',surface:object} : {status:'UNKNOWN',reason_code:'UNKNOWN'}; } const matches=this.#allObjects('SURFACE','CURRENT').filter(x=>x.platform===platform && x.external_id===external_id); if (!matches.length) return {status:'UNKNOWN',reason_code:'ENTITY_NEW'}; if (matches.length>1) return {status:'AMBIGUOUS',reason_code:'AMBIGUOUS_ALIAS',candidate_ids:matches.map(x=>x.id)}; return {status:'UNIQUE',surface:matches[0]}; }
+  #allObjects(type, status) { const rows=this.db.prepare('SELECT body FROM objects WHERE type=?' + (status ? ' AND status=?' : '') + ' ORDER BY id').all(...(status?[type,status]:[type])); return rows.map(row=>parse(row.body)); }
+  listCurrent(type) { return this.#allObjects(type,'CURRENT'); }
+  listCurrentRelations(entityId) { return this.#allObjects('RELATION','CURRENT').filter(r=>!entityId || r.from_id===entityId || r.to_id===entityId); }
+  listOperationalTasks() { return this.#allObjects('TASK').filter(task=>['OPEN','READY','IN_PROGRESS','BLOCKED'].includes(task.state)); }
+  getHistory(subject_id, property_key) {
+    const decisions=this.db.prepare("SELECT object_id FROM decisions WHERE subject_id=?" + (property_key?' AND decision_key=?':'') + " ORDER BY effective_at, CASE status WHEN 'SUPERSEDED' THEN 0 ELSE 1 END, object_id").all(...(property_key?[subject_id,property_key]:[subject_id])).map(r=>this.#object(r.object_id));
+    const verifications=this.db.prepare('SELECT object_id FROM verifications WHERE subject_id=?' + (property_key?' AND attribute=?':'') + ' ORDER BY object_id').all(...(property_key?[subject_id,property_key]:[subject_id])).map(r=>this.#object(r.object_id));
+    const relations=this.#allObjects('RELATION').filter(r=>r.from_id===subject_id || r.to_id===subject_id);
+    const tasks=this.#allObjects('TASK').filter(task=>task.related_ids.includes(subject_id));
+    const ids=new Set([...decisions,...verifications,...relations,...tasks].map(x=>x.id));
+    return {decisions,verifications,relations,tasks,audit:this.getAudit().filter(a=>ids.has(a.object_id))};
+  }
+  #verificationState(object, at=now()) { if (object.status!=='CURRENT') return object.status; if (object.class==='VOLÁTIL' && object.valid_until<=at) return 'EXPIRED'; return 'CURRENT'; }
+  getEntityCard(entityId) {
+    const entity=this.#object(entityId); if (!entity || entity.type!=='ENTITY') throw new CF2Error('UNKNOWN');
+    const decisions=this.db.prepare("SELECT object_id FROM decisions WHERE subject_id=? AND status='CURRENT' ORDER BY decision_key").all(entityId).map(r=>this.#object(r.object_id));
+    const verifications=this.db.prepare("SELECT object_id FROM verifications WHERE subject_id=? AND status='CURRENT' ORDER BY attribute").all(entityId).map(r=>this.#object(r.object_id));
+    const related=this.listCurrentRelations(entityId); const tasks=this.listOperationalTasks().filter(t=>t.related_ids.includes(entityId));
+    return {kind:'ENTITY_CARD',entity,relations:related,decisions,verifications:verifications.map(v=>({...v,validity:this.#verificationState(v)})),tasks,history_ref:{subject_id:entityId},generated_from_state_version:this.#version()};
+  }
+  getSurfaceView(surfaceId) {
+    const surface=this.#object(surfaceId); if (!surface || surface.type!=='SURFACE') throw new CF2Error('UNKNOWN');
+    const verifications=this.db.prepare('SELECT object_id FROM verifications WHERE subject_id=? ORDER BY attribute').all(surfaceId).map(r=>this.#object(r.object_id)).map(v=>({...v,validity:this.#verificationState(v)}));
+    return {kind:'SURFACE_VIEW',surface,verifications,history_ref:{subject_id:surfaceId},generated_from_state_version:this.#version()};
+  }
+  getTaskView() { const groups={OPEN:[],READY:[],IN_PROGRESS:[],BLOCKED:[]}; for(const task of this.listOperationalTasks()) groups[task.state].push(task); return {kind:'TASK_VIEW',groups,generated_from_state_version:this.#version()}; }
+  getSnapshot() {
+    const tasks=this.getTaskView().groups; const decisions=this.#allObjects('DECISION','CURRENT'); const allVerifications=this.#allObjects('VERIFICATION');
+    const expired=allVerifications.filter(v=>this.#verificationState(v)==='EXPIRED'); const conflicts=[...this.#allObjects('DECISION','CONFLICT'),...this.#allObjects('VERIFICATION','CONFLICT'),...this.#allObjects('RELATION','CONFLICT')];
+    return {kind:'STARTUP_SNAPSHOT',generated_from_state_version:this.#version(),blocked_tasks:tasks.BLOCKED,open_tasks:[...tasks.OPEN,...tasks.READY,...tasks.IN_PROGRESS],current_decisions:decisions,expired_verifications:expired,conflicts,active_objects:[...this.#allObjects('ENTITY','CURRENT'),...this.#allObjects('SURFACE','CURRENT')],main_relations:this.listCurrentRelations()};
+  }
+  #saveView(key, body) { const version=this.#version(); const full={...body,generated_from_state_version:version}; this.db.prepare('INSERT OR REPLACE INTO views VALUES(?,?,?,?)').run(key,json(full),version,now()); return full; }
+  regenerateEntityView(entityId) { return this.#saveView(`ENTITY:${entityId}`,this.getEntityCard(entityId)); }
+  regenerateSurfaceView(surfaceId) { return this.#saveView(`SURFACE:${surfaceId}`,this.getSurfaceView(surfaceId)); }
+  regenerateTaskView() { return this.#saveView('TASKS:OPERATIONAL',this.getTaskView()); }
+  regenerateSnapshot() { return this.#saveView('SNAPSHOT:DEFAULT',this.getSnapshot()); }
+  readDerivedView(key) { const row=this.db.prepare('SELECT body,generated_from_state_version FROM views WHERE view_key=?').get(key); if (!row) return {status:'MISSING'}; try { const body=parse(row.body); return Number(row.generated_from_state_version)===this.#version() ? {status:'VALID',body} : {status:'STALE'}; } catch { return {status:'INVALID'}; } }
+  deleteAllViews() { const result=this.db.prepare('DELETE FROM views').run(); return result.changes; }
+  regenerateAllViews() { const entityViews=this.#allObjects('ENTITY','CURRENT').map(x=>this.regenerateEntityView(x.id)); const surfaceViews=this.#allObjects('SURFACE','CURRENT').map(x=>this.regenerateSurfaceView(x.id)); return {entities:entityViews.length,surfaces:surfaceViews.length,tasks:this.regenerateTaskView(),snapshot:this.regenerateSnapshot()}; }
+  authoritativeDigest() { const rows=['objects','decisions','verifications','tasks','proofs','audit','outbox','idempotency'].map(table=>[table,this.db.prepare(`SELECT * FROM ${table} ORDER BY 1`).all()]); return crypto.createHash('sha256').update(json(rows)).digest('hex'); }
   deleteView(key) { this.db.prepare('DELETE FROM views WHERE view_key=?').run(key); }
   corruptView(key) { this.db.prepare('UPDATE views SET body=? WHERE view_key=?').run('{corrupt',key); }
   getAudit() { return this.db.prepare('SELECT * FROM audit ORDER BY timestamp').all(); }

@@ -22,7 +22,7 @@ test('T13 mapping requires exact C file id', () => assert.equal(data.mappings[0]
 test('T15 B path is not proof', () => assert.ok(!('B_path' in data.proofs[0])));
 test('T23 derived index cannot alter entity current state', () => assert.equal(byId('ENTITY:INDEPENDIZA').status, 'CURRENT'));
 test('T24 historical entity resolves by stable ID', () => assert.equal(byId('ENTITY:MITXODA').id, 'ENTITY:MITXODA'));
-test('T27 Somos mas relation and current decision are typed', () => { assert.equal(byId('RELATION:LM110:SOMOS').relation_type, 'BELONGS_TO'); assert.equal(byId('DECISION:SOMOS:CURRENT').value, 'ACTIVE_CONSTRUCTION'); });
+test('T27 Somos mas current project and LM110 relation are typed', () => { assert.equal(byId('ENTITY:SOMOS_MAS').entity_kind, 'PROJECT'); assert.equal(byId('ENTITY:LM110').entity_kind, 'TRACK'); assert.equal(byId('RELATION:LM110:SOMOS').to_id, 'ENTITY:SOMOS_MAS'); assert.equal(byId('DECISION:SOMOS:CURRENT').value, 'ACTIVE_CONSTRUCTION'); });
 test('T29 request event is not closure', () => { const event = data.events[0]; validateEnvelope('event', event, event.event_id); assert.equal(event.event_type, 'REQUESTED'); });
 test('acknowledgement and execution remain distinct event types', () => assert.notEqual('ACCEPTED', 'EXECUTION_STARTED'));
 test('T30 empty deterministic job carries no agent invocation', () => assert.equal(data.jobs[0].job_type, 'NOOP_ON_EMPTY_EVENT'));
