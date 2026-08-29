@@ -22,7 +22,7 @@ function validateObject(object, label = object.id ?? 'object') {
   if (!Array.isArray(object.basis_ref) || object.basis_ref.length === 0) errors.push(`${label}: basis_ref required`);
   if (!iso(object.created_at) || !iso(object.updated_at)) errors.push(`${label}: invalid timestamps`);
   if (kind === 'TASK' && object.state === 'DONE' && !object.closure_ref) errors.push(`${label}: MISSING_CLOSURE_PROOF`);
-  if (kind === 'VERIFICATION' && object.class === 'VOLATIL' && !object.valid_until) errors.push(`${label}: STALE_VERIFICATION policy missing`);
+  if (kind === 'VERIFICATION' && object.class === 'VOLÁTIL' && !object.valid_until) errors.push(`${label}: STALE_VERIFICATION policy missing`);
   if (kind === 'VERIFICATION' && object.class === 'CONDICIONAL' && !object.invalidation_rule) errors.push(`${label}: conditional invalidation rule missing`);
   if (kind === 'DECISION' && !['CLAUDIO_DIRECT','CLAUDIO_PERSISTED','DGA_DELEGATED','ROLE_DELEGATED'].includes(object.authority)) errors.push(`${label}: invalid authority`);
 }
