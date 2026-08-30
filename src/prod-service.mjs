@@ -1,7 +1,7 @@
 import http from 'node:http';
 import { PostgresStore } from './postgres-store.mjs';
 
-const config = Object.freeze({ release_id: process.env.CF2_RELEASE_ID, database_url: process.env.CF2_DATABASE_URL, port: Number(process.env.PORT ?? 10000), production_cutover_enabled: false, external_adapters_enabled: false, role_cutover_enabled: false });
+const config = Object.freeze({ release_id: process.env.CF2_RELEASE_ID, database_url: process.env.CF2_DATABASE_URL ?? process.env.DATABASE_URL, port: Number(process.env.PORT ?? 10000), production_cutover_enabled: false, external_adapters_enabled: false, role_cutover_enabled: false });
 if (!config.release_id || !config.database_url) throw new Error('CF2_RELEASE_ID_AND_DATABASE_URL_REQUIRED');
 const store = new PostgresStore({ connectionString: config.database_url });
 await store.migrate();
