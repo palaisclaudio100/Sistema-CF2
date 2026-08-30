@@ -22,3 +22,10 @@ test('production code has no embedded connection string or secret material', () 
   assert.match(service, /rejectUnauthorized: !renderInternalDatabase/);
   assert.doesNotMatch(`${service}\n${store}`, /postgres(?:ql)?:\/\/[^$\s]/i);
 });
+
+test('production health verifier is non-destructive and requires fail-closed flags', () => {
+  const verifier = read('scripts/verify-prod-health.mjs');
+  assert.match(verifier, /fetch\(endpoint/);
+  assert.match(verifier, /CF2_PRODUCTION_FLAGS_NOT_FAIL_CLOSED/);
+  assert.doesNotMatch(verifier, /POST|PUT|PATCH|DELETE/);
+});
