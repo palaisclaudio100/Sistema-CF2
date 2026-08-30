@@ -18,5 +18,7 @@ test('production code has no embedded connection string or secret material', () 
   const service = read('src/prod-service.mjs');
   const store = read('src/postgres-store.mjs');
   assert.match(service, /CF2_DATABASE_URL/);
+  assert.match(service, /\^dpg-\[a-z0-9\]\+\-a\$/);
+  assert.match(service, /rejectUnauthorized: !renderInternalDatabase/);
   assert.doesNotMatch(`${service}\n${store}`, /postgres(?:ql)?:\/\/[^$\s]/i);
 });
