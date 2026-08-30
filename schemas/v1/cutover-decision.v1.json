@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "cf2://schemas/v1/cutover-decision.v1.json",
+  "version": "1.0.0",
+  "type": "object",
+  "required": ["decision_id", "scope", "effective_at", "baseline_id", "release_id", "approved_by", "previous_writer", "new_writer", "equality_check_ref", "rollback_plan_ref", "status", "environment"],
+  "properties": {
+    "decision_id": {"type": "string"},
+    "scope": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+    "effective_at": {"type": "string", "format": "date-time"},
+    "baseline_id": {"type": "string"},
+    "release_id": {"type": "string"},
+    "approved_by": {"type": "string"},
+    "previous_writer": {"const": "CF1_WRITER"},
+    "new_writer": {"const": "CF2_WRITER"},
+    "equality_check_ref": {"type": "string"},
+    "rollback_plan_ref": {"type": "string"},
+    "environment": {"enum": ["STAGING", "SHADOW"]},
+    "status": {"enum": ["DRAFT", "READY", "APPROVED_NOT_EXECUTED_SIMULATION", "EXECUTED", "ROLLED_BACK", "CANCELLED"]}
+  },
+  "additionalProperties": false
+}
