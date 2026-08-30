@@ -1,0 +1,13 @@
+CREATE TABLE IF NOT EXISTS schema_migrations (version TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT now());
+CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value JSONB NOT NULL);
+CREATE TABLE IF NOT EXISTS objects (id TEXT PRIMARY KEY, type TEXT NOT NULL, status TEXT NOT NULL, body JSONB NOT NULL, created_at TIMESTAMPTZ NOT NULL, updated_at TIMESTAMPTZ NOT NULL);
+CREATE TABLE IF NOT EXISTS decisions (object_id TEXT PRIMARY KEY REFERENCES objects(id), subject_id TEXT NOT NULL, decision_key TEXT NOT NULL, status TEXT NOT NULL, authority TEXT NOT NULL, authority_rank INTEGER NOT NULL, effective_at TIMESTAMPTZ NOT NULL, supersedes TEXT);
+CREATE UNIQUE INDEX IF NOT EXISTS decisions_one_current ON decisions(subject_id, decision_key) WHERE status = 'CURRENT';
+CREATE TABLE IF NOT EXISTS tasks (object_id TEXT PRIMARY KEY REFERENCES objects(id), state TEXT NOT NULL, closure_ref TEXT);
+CREATE TABLE IF NOT EXISTS verifications (object_id TEXT PRIMARY KEY REFERENCES objects(id), subject_id TEXT NOT NULL, attribute TEXT NOT NULL, class TEXT NOT NULL, status TEXT NOT NULL, valid_until TIMESTAMPTZ, invalidation_rule TEXT);
+CREATE TABLE IF NOT EXISTS proofs (proof_ref TEXT PRIMARY KEY, body JSONB NOT NULL, created_at TIMESTAMPTZ NOT NULL);
+CREATE TABLE IF NOT EXISTS audit (mutation_id TEXT PRIMARY KEY, timestamp TIMESTAMPTZ NOT NULL, actor_id TEXT NOT NULL, actor_role TEXT NOT NULL, command_id TEXT, object_id TEXT, previous_version BIGINT NOT NULL, new_version BIGINT NOT NULL, reason TEXT NOT NULL, result TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS outbox (event_id TEXT PRIMARY KEY, event_type TEXT NOT NULL, state_version BIGINT NOT NULL, payload JSONB NOT NULL, created_at TIMESTAMPTZ NOT NULL, status TEXT NOT NULL DEFAULT 'PENDING');
+CREATE TABLE IF NOT EXISTS idempotency (idempotency_key TEXT PRIMARY KEY, response JSONB NOT NULL);
+CREATE TABLE IF NOT EXISTS jobs (job_id TEXT PRIMARY KEY, event_id TEXT UNIQUE, job_type TEXT NOT NULL, payload JSONB NOT NULL, status TEXT NOT NULL, worker_id TEXT, claimed_at TIMESTAMPTZ, lease_until TIMESTAMPTZ, attempt INTEGER NOT NULL DEFAULT 0, next_attempt_at TIMESTAMPTZ, dedupe_key TEXT UNIQUE NOT NULL, last_error TEXT, result JSONB);
+INSERT INTO meta(key, value) VALUES ('state_version', '0'::jsonb) ON CONFLICT (key) DO NOTHING;

@@ -1,0 +1,28 @@
+services:
+  - type: web
+    name: cf2-prod-core
+    runtime: node
+    plan: starter
+    buildCommand: pnpm install --frozen-lockfile
+    startCommand: pnpm start:prod
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: CF2_DATABASE_URL
+        fromDatabase:
+          name: cf2-prod-postgres
+          property: connectionString
+      - key: CF2_RELEASE_ID
+        sync: false
+      - key: CF2_PRODUCTION_WRITER_ENABLED
+        value: "false"
+      - key: CF2_EXTERNAL_ADAPTERS_ENABLED
+        value: "false"
+      - key: CF2_ROLE_CUTOVER_ENABLED
+        value: "false"
+databases:
+  - name: cf2-prod-postgres
+    plan: basic-256mb
+    databaseName: cf2prod
+    user: cf2prod

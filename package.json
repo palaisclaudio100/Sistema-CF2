@@ -8,7 +8,14 @@
     "lint": "node scripts/lint.mjs",
     "validate": "node scripts/validate-contracts.mjs",
     "test": "node --test",
-    "check": "npm run lint && npm run validate && npm test"
+    "check": "node scripts/lint.mjs && node scripts/validate-contracts.mjs && node --test",
+    "migrate:prod": "node scripts/migrate-prod.mjs",
+    "start:prod": "node src/prod-service.mjs"
   },
-  "engines": { "node": ">=20" }
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "pg": "^8.23.0"
+  }
 }
