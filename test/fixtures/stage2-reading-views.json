@@ -1,0 +1,11 @@
+{
+  "entities": [
+    {"id":"ENTITY:ALFA","name":"Alfa","aliases":["Alias único","Nombre compartido"]},
+    {"id":"ENTITY:BETA","name":"Beta","aliases":["Nombre compartido"]},
+    {"id":"ENTITY:ZETA","name":"Zeta","aliases":[]},
+    {"id":"ENTITY:UNRELATED","name":"Entidad sin actividad","aliases":[]}
+  ],
+  "surface": {"id":"SURFACE:YOUTUBE:ALFA","platform":"YOUTUBE","external_id":"alfa-exact","owner":"ENTITY:ALFA"},
+  "active_relation": {"id":"RELATION:ALFA:ZETA","from":"ENTITY:ALFA","to":"ENTITY:ZETA"},
+  "old_view": {"kind":"ENTITY_CARD","entity":{"id":"ENTITY:ALFA","canonical_name":"Nombre antiguo"},"generated_from_state_version":12}
+}

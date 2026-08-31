@@ -1,17 +1,31 @@
-# Lectura y vistas — Etapa 2 DEV
+# CF2 — Lectura y vistas
 
-Las consultas de lectura salen exclusivamente de `CoreStore`; no usan corpus narrativo, Drive, D:, G: ni una vista previamente guardada como autoridad.
+El Core es la única autoridad. Las fichas, índices, superficies, tareas y el snapshot son proyecciones descartables y regenerables.
 
-## Consultas
+## Resolución determinista
 
-- `resolveEntity()` resuelve ID exacto, canonical name o alias normalizado. Más de un resultado devuelve `AMBIGUOUS_ALIAS`.
-- `resolveSurface()` resuelve ID interno o la pareja exacta `platform + external_id`.
-- `getCurrent()` devuelve únicamente CURRENT, EXPIRED o UNKNOWN.
-- `getHistory()` trae decisiones, verificaciones, relaciones, tareas y audit del sujeto solo bajo demanda.
-- `getSnapshot()` produce el arranque mínimo: tareas activas, decisiones vigentes, verificaciones vencidas, conflictos, objetos activos y relaciones principales.
+`resolveEntity()` aplica estrictamente: ID interno exacto, nombre canónico exacto normalizado y alias exacto normalizado. Un alias único resuelve; dos candidatos devuelven `AMBIGUOUS`; una ausencia devuelve `UNKNOWN / ENTITY_CANDIDATE_NEW`. La resolución nunca fusiona entidades ni convierte un nombre en ID.
 
-## Vistas derivadas
+`resolveSurface()` aplica ID interno o la pareja exacta `platform + external_id`. `resolveCurrent()` encadena resolución y recuperación bajo demanda.
 
-`getEntityCard`, `getSurfaceView`, `getTaskView` y `getSnapshot` se pueden persistir en `views` para rendimiento. `deleteAllViews()` las descarta; `regenerateAllViews()` las vuelve a derivar del Core. `authoritativeDigest()` excluye la tabla de vistas y permite demostrar que la destrucción/regeneración no mutó verdad autoritativa.
+## CURRENT e HISTORY
 
-Una vista ausente, vencida o corrupta se marca como tal; jamás cambia CURRENT.
+`listCurrent()` cubre ENTITY, SURFACE, TASK, DECISION, VERIFICATION y RELATION. Excluye supersedidos, tareas no operativas y verificaciones volátiles vencidas. La ausencia permanece `UNKNOWN`, nunca `FALSE`.
+
+`getCurrentBundle()` devuelve el sujeto, sus superficies directas, decisiones, relaciones, tareas operativas y verificaciones pertinentes. Solo recorre vínculos directos necesarios. `getHistory()` es una llamada separada y explícita para antecedentes, `basis_ref`, contradicciones y supersesiones.
+
+## Snapshot y vistas
+
+`getSnapshot()` contiene tareas OPEN/READY/IN_PROGRESS/BLOCKED, decisiones CURRENT, conflictos y referencias necesarias para hidratar el camino activo. No incorpora todas las entidades ni el corpus Maestro/Estado/Histórico.
+
+Las proyecciones regenerables son:
+
+- fichas compactas por ENTITY, con superficies y contexto CURRENT;
+- índice alfabético de entidades;
+- superficies CURRENT;
+- tareas operativas;
+- snapshot de arranque.
+
+`deleteAllViews()` puede eliminarlas físicamente. `regenerateAllViews()` las reconstruye íntegramente desde el Core. `authoritativeDigest()` excluye las vistas y demuestra que destruirlas, corromperlas o regenerarlas no altera estado autoritativo. `derivedViewsDigest()` permite comparar la equivalencia lógica de dos regeneraciones.
+
+Una lectura CURRENT nunca consulta la tabla `views`; una proyección vieja o corrupta se repara regenerándola desde el Core.
