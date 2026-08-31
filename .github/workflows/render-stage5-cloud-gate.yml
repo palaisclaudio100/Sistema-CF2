@@ -15,23 +15,55 @@ jobs:
       - name: Create isolated Free staging service if absent
         run: |
           python3 - <<'PY'
-          import json, os, urllib.request, urllib.error
+          import json, os, re, urllib.request, urllib.error
           API='https://api.render.com/v1'; token=os.environ.get('RENDER_API_KEY')
           def call(method,path,payload=None):
             req=urllib.request.Request(API+path,data=None if payload is None else json.dumps(payload).encode(),method=method,headers={'Accept':'application/json','Content-Type':'application/json','Authorization':f'Bearer {token}'})
             with urllib.request.urlopen(req,timeout=45) as r: return json.load(r)
           if not token: raise SystemExit('SECRET_MISSING')
+          def sanitized_error(error):
+            status=getattr(error,'code','UNKNOWN')
+            try: raw=error.read().decode('utf-8','replace')
+            except Exception: raw=''
+            message='RENDER_VALIDATION_ERROR'; fields=[]; error_type=None
+            try:
+              body=json.loads(raw)
+              if isinstance(body,dict):
+                error_type=body.get('code') or body.get('type')
+                candidate=body.get('message') or body.get('error')
+                if isinstance(candidate,str): message=candidate
+                details=body.get('details') or body.get('errors') or []
+                if isinstance(details,list):
+                  fields=[str(x.get('field')) for x in details if isinstance(x,dict) and x.get('field')]
+            except (json.JSONDecodeError,UnicodeError):
+              if raw: message=raw
+            clean=lambda value: re.sub(r'[^A-Za-z0-9 _.,:/-]','_',str(value))[:500]
+            print('RENDER_CREATE_SERVICE_FAILED')
+            print('HTTP_STATUS='+clean(status))
+            if error_type: print('ERROR_TYPE='+clean(error_type))
+            print('ERROR='+clean(message))
+            if fields: print('REJECTED_FIELDS='+','.join(clean(x) for x in fields[:20]))
+            return clean(message)
+          def find_gate_service():
+            rows=call('GET','/services?limit=100')
+            return next((x.get('service',x) for x in rows if x.get('service',x).get('name')=='cf2-stage5-role-gate'),None)
           owners=call('GET','/owners?limit=100'); owner=next((x.get('owner',x) for x in owners if x.get('owner',x).get('name')=='My Workspace'),None)
           if not owner: raise SystemExit('WORKSPACE_NOT_FOUND')
-          services=call('GET','/services?limit=100'); existing=[x.get('service',x) for x in services if x.get('service',x).get('name')=='cf2-stage5-role-gate']
-          if existing: service=existing[0]
+          service=find_gate_service()
+          if service: pass
           else:
-            payload={'type':'web_service','name':'cf2-stage5-role-gate','ownerId':owner['id'],'repo':'https://github.com/palaisclaudio100/Sistema-CF2','branch':'master','autoDeploy':'no','envVars':[{'key':'NODE_ENV','value':'staging'},{'key':'STAGE5_PROVISIONAL_FOLDER_ID','value':'1aS6hOR_V3iW5swYPtWOF8XeeLDcyqB2H'},{'key':'STAGE5_PROVISIONAL_REQUEST_ID','value':'1Bhvk22HKJS0EPGW4167y4lwTlGbs_4F6'},{'key':'STAGE5_PROVISIONAL_RESPONSE_ID','value':'1MeHNxp0tfHicbJu-ApnrVRlGy_6UTXda'}],'serviceDetails':{'env':'node','plan':'free','region':'oregon','buildCommand':'pnpm install --frozen-lockfile','startCommand':'node src/stage5-cloud-gate-server.mjs','healthCheckPath':'/healthz','numInstances':1}}
-            try: created=call('POST','/services',payload)
+            payload={'type':'web_service','name':'cf2-stage5-role-gate','ownerId':owner['id'],'repo':'https://github.com/palaisclaudio100/Sistema-CF2','branch':'master','autoDeploy':'no','envVars':[{'key':'NODE_ENV','value':'staging'},{'key':'STAGE5_PROVISIONAL_FOLDER_ID','value':'1aS6hOR_V3iW5swYPtWOF8XeeLDcyqB2H'},{'key':'STAGE5_PROVISIONAL_REQUEST_ID','value':'1Bhvk22HKJS0EPGW4167y4lwTlGbs_4F6'},{'key':'STAGE5_PROVISIONAL_RESPONSE_ID','value':'1MeHNxp0tfHicbJu-ApnrVRlGy_6UTXda'}],'serviceDetails':{'runtime':'node','plan':'free','region':'oregon','healthCheckPath':'/healthz','numInstances':1,'envSpecificDetails':{'buildCommand':'pnpm install --frozen-lockfile','startCommand':'node src/stage5-cloud-gate-server.mjs'}}}
+            try:
+              created=call('POST','/services',payload)
+              service=created.get('service',created)
             except urllib.error.HTTPError as e:
+              message=sanitized_error(e)
               if e.code==402: raise SystemExit('COST_AUTHORIZATION_REQUIRED')
-              raise
-            service=created.get('service',created)
+              if 'free' in message.lower() and ('unavailable' in message.lower() or 'not available' in message.lower()): raise SystemExit('FREE_PLAN_UNAVAILABLE')
+              raise SystemExit(1)
+            except (urllib.error.URLError,TimeoutError):
+              service=find_gate_service()
+              if not service: raise SystemExit('RENDER_CREATE_RESULT_AMBIGUOUS_NO_RETRY')
           details=service.get('serviceDetails',{})
           if details.get('plan',service.get('plan'))!='free': raise SystemExit('FREE_PLAN_UNAVAILABLE')
           print('STAGE5_SERVICE_ID='+service['id'])
