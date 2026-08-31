@@ -11,6 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+      GATE_COMMIT: ${{ github.sha }}
     steps:
       - name: Deploy exact commit to exact isolated Free staging service
         run: |
@@ -19,7 +20,7 @@ jobs:
           API='https://api.render.com/v1'; token=os.environ.get('RENDER_API_KEY')
           STAGING_ID='srv-daaqc2u7bikc73fkg44g'
           PROD_CORE_ID='srv-daa8dngae00c73a3m15g'
-          TARGET_COMMIT='8ca2c34fa864d85e79f617ed31eed1921f55ced1'
+          TARGET_COMMIT=os.environ['GATE_COMMIT']
           def clean(value): return re.sub(r'[^A-Za-z0-9 _.,:/-]','_',str(value))[:500]
           def fail_http(error):
             try: body=json.loads(error.read().decode('utf-8','replace'))
