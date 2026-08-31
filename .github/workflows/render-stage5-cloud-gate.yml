@@ -11,36 +11,77 @@ jobs:
     runs-on: ubuntu-latest
     env:
       RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
-      GATE_COMMIT: ${{ github.sha }}
     steps:
-      - name: Update exact isolated Free staging service
+      - name: Deploy exact commit to exact isolated Free staging service
         run: |
           python3 - <<'PY'
-          import json, os, urllib.request
+          import json, os, re, time, urllib.request, urllib.error
           API='https://api.render.com/v1'; token=os.environ.get('RENDER_API_KEY')
           STAGING_ID='srv-daaqc2u7bikc73fkg44g'
           PROD_CORE_ID='srv-daa8dngae00c73a3m15g'
+          TARGET_COMMIT='8ca2c34fa864d85e79f617ed31eed1921f55ced1'
+          def clean(value): return re.sub(r'[^A-Za-z0-9 _.,:/-]','_',str(value))[:500]
+          def fail_http(error):
+            try: body=json.loads(error.read().decode('utf-8','replace'))
+            except Exception: body={}
+            error_type=body.get('code') or body.get('type') or 'HTTP_ERROR'
+            message=body.get('message') or body.get('error') or 'Render request rejected'
+            print('HTTP_STATUS='+clean(getattr(error,'code','UNKNOWN')))
+            print('ERROR_TYPE='+clean(error_type))
+            print('ERROR_MESSAGE='+clean(message))
+            raise SystemExit(1)
           def call(method,path,payload=None):
             req=urllib.request.Request(API+path,data=None if payload is None else json.dumps(payload).encode(),method=method,headers={'Accept':'application/json','Content-Type':'application/json','Authorization':f'Bearer {token}'})
-            with urllib.request.urlopen(req,timeout=45) as r: return json.load(r)
+            try:
+              with urllib.request.urlopen(req,timeout=45) as response: return response.status,json.load(response)
+            except urllib.error.HTTPError as error: fail_http(error)
+          def deploy_from(row): return row.get('deploy',row)
+          def commit_of(deploy): return (deploy.get('commit') or {}).get('id') or deploy.get('commitId')
+          def find_target_deploy():
+            _,rows=call('GET',f'/services/{STAGING_ID}/deploys?limit=20')
+            return next((deploy_from(row) for row in rows if commit_of(deploy_from(row))==TARGET_COMMIT),None)
           if not token: raise SystemExit('SECRET_MISSING')
           if STAGING_ID==PROD_CORE_ID: raise SystemExit('PRODUCTION_ISOLATION_UNPROVEN')
-          service=call('GET',f'/services/{STAGING_ID}')
-          service=service.get('service',service)
-          details=service.get('serviceDetails',{})
+          _,service_result=call('GET',f'/services/{STAGING_ID}')
+          service=service_result.get('service',service_result); details=service.get('serviceDetails',{})
           if service.get('id')!=STAGING_ID: raise SystemExit('STAGING_SERVICE_ID_MISMATCH')
           if service.get('name')!='cf2-stage5-role-gate': raise SystemExit('STAGING_SERVICE_NAME_MISMATCH')
           if details.get('plan',service.get('plan'))!='free': raise SystemExit('FREE_PLAN_UNAVAILABLE')
+          if service.get('repo')!='https://github.com/palaisclaudio100/Sistema-CF2': raise SystemExit('STAGING_REPO_MISMATCH')
+          if service.get('branch')!='master': raise SystemExit('STAGING_BRANCH_MISMATCH')
           if service.get('autoDeploy')!='no': raise SystemExit('STAGING_AUTODEPLOY_NOT_OFF')
-          env_rows=call('GET',f'/services/{STAGING_ID}/env-vars')
+          _,env_rows=call('GET',f'/services/{STAGING_ID}/env-vars')
           env_keys={row.get('envVar',row).get('key') for row in env_rows}
           if {'DATABASE_URL','CF2_DATABASE_URL'} & env_keys: raise SystemExit('PRODUCTION_DATABASE_BINDING_PRESENT')
-          deploys=call('GET',f"/services/{service['id']}/deploys?limit=1")
-          current=(deploys[0].get('deploy',deploys[0]) if deploys else {})
-          current_commit=(current.get('commit') or {}).get('id')
-          if current_commit!=os.environ['GATE_COMMIT']:
-            call('POST',f"/services/{STAGING_ID}/deploy",{'commitId':os.environ['GATE_COMMIT']})
-          print('STAGE5_SERVICE_ID='+service['id'])
-          print('STAGE5_SERVICE_URL='+details.get('url',service.get('url','')))
+          deploy=find_target_deploy()
+          if not deploy:
+            try:
+              status,created=call('POST',f'/services/{STAGING_ID}/deploys',{'commitId':TARGET_COMMIT})
+              if status not in (201,202): raise SystemExit('DEPLOY_CREATE_STATUS_INVALID')
+              deploy=deploy_from(created)
+            except (urllib.error.URLError,TimeoutError):
+              deploy=find_target_deploy()
+              if not deploy: raise SystemExit('DEPLOY_RESULT_AMBIGUOUS_NO_RETRY')
+          deploy_id=deploy.get('id')
+          if not deploy_id: raise SystemExit('DEPLOY_ID_MISSING')
+          deadline=time.time()+900
+          while True:
+            _,current_result=call('GET',f'/services/{STAGING_ID}/deploys/{deploy_id}')
+            current=deploy_from(current_result); state=current.get('status')
+            if state in {'live','build_failed','update_failed','canceled','deactivated'}: break
+            if time.time()>=deadline: raise SystemExit('DEPLOY_STATUS_TIMEOUT')
+            time.sleep(10)
+          if state!='live': raise SystemExit('DEPLOY_TERMINAL_'+clean(state).upper())
+          if commit_of(current)!=TARGET_COMMIT: raise SystemExit('DEPLOY_COMMIT_MISMATCH')
+          _,post_result=call('GET',f'/services/{STAGING_ID}')
+          post=post_result.get('service',post_result); post_details=post.get('serviceDetails',{})
+          if post.get('id')!=STAGING_ID or post_details.get('plan',post.get('plan'))!='free' or post.get('autoDeploy')!='no': raise SystemExit('POST_DEPLOY_IDENTITY_MISMATCH')
+          health_url=post_details.get('url',post.get('url','')).rstrip('/')+'/healthz'
+          with urllib.request.urlopen(health_url,timeout=45) as response: health=json.load(response)
+          if response.status!=200 or health.get('status')!='UP': raise SystemExit('STAGING_HEALTH_FAILED')
+          print('STAGE5_SERVICE_ID='+STAGING_ID)
+          print('STAGE5_DEPLOY_ID='+deploy_id)
+          print('STAGE5_DEPLOY_COMMIT='+TARGET_COMMIT)
           print('STAGE5_PLAN=free')
+          print('STAGE5_HEALTH=PASS')
           PY
