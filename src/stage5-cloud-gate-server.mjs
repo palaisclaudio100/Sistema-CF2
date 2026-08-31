@@ -7,7 +7,19 @@ import {CoreStore} from './core-store.mjs';
 import {RoleInterface} from './role-interface.mjs';
 import {GoogleDriveClient,Stage5DriveBridge,DRIVE_SCOPE} from './stage5-drive-bridge.mjs';
 
-const PORT=Number(process.env.PORT??10000);const BASE_URL=process.env.STAGE5_PUBLIC_URL??`http://127.0.0.1:${PORT}`;
+const PORT=Number(process.env.PORT??10000);
+export function resolvePublicBaseUrl(env=process.env){
+  const configured=env.STAGE5_PUBLIC_URL??env.RENDER_EXTERNAL_URL;
+  if(configured){
+    const normalized=configured.replace(/\/+$/,'');
+    const parsed=new URL(normalized);
+    if(!['http:','https:'].includes(parsed.protocol))throw new Error('STAGE5_PUBLIC_URL_INVALID');
+    return normalized;
+  }
+  if(['development','test'].includes(env.NODE_ENV))return `http://127.0.0.1:${Number(env.PORT??10000)}`;
+  throw new Error('RENDER_EXTERNAL_URL_REQUIRED');
+}
+const BASE_URL=resolvePublicBaseUrl();
 const dbRoot=fs.mkdtempSync(path.join(os.tmpdir(),'cf2-stage5-cloud-'));const store=new CoreStore(path.join(dbRoot,'synthetic.db'));
 const roles=new RoleInterface(store,{localAvailable:false,version:'stage5-cloud-gate'});
 const oauthConfigured=Boolean(process.env.GOOGLE_OAUTH_CLIENT_ID&&process.env.GOOGLE_OAUTH_CLIENT_SECRET);
