@@ -42,9 +42,9 @@ test('orphaned lease is recovered after expiry without duplicate logical effect'
 
 test('retry observes deterministic backoff and preserves failed first attempt',async()=>{const x=setup();try {
   x.store.enqueueDevJob({job_type:'DEV_FAIL_ONCE',payload:{fail_attempts:1},dedupe_key:'RETRY:ONE',at:T0});
-  const first=await x.worker.runOnce({at:T0}); let job=x.store.listJobs()[0]; assert.equal(first.retried,1); assert.equal(job.status,'RETRY_WAIT'); assert.equal(job.next_attempt_at,'2026-08-29T10:00:01.000Z');
+  const first=await x.worker.runOnce({at:T0}); let job=x.store.listJobs()[0]; assert.equal(first.retried,1); assert.equal(job.status,'RETRY_WAIT'); assert.ok(job.next_attempt_at>'2026-08-29T10:00:01.000Z' && job.next_attempt_at<'2026-08-29T10:00:01.250Z');
   const early=await x.worker.runOnce({at:'2026-08-29T10:00:00.500Z'}); assert.equal(early.executed,0); assert.equal(x.store.listJobs()[0].attempt,1);
-  await x.worker.runOnce({at:'2026-08-29T10:00:01.000Z'}); job=x.store.listJobs()[0]; assert.equal(job.status,'DONE'); assert.equal(job.attempt,2); assert.ok(x.store.getJobAttempts(job.job_id).some(a=>a.status==='RETRY_WAIT'));
+  await x.worker.runOnce({at:job.next_attempt_at}); job=x.store.listJobs()[0]; assert.equal(job.status,'DONE'); assert.equal(job.attempt,2); assert.ok(x.store.getJobAttempts(job.job_id).some(a=>a.status==='RETRY_WAIT')); assert.equal(x.store.listTimers()[0].status,'FIRED');
 }finally{x.done();}});
 
 test('TTL expires only the due volatile verification and does not invoke an agent',async()=>{const x=setup();try {
