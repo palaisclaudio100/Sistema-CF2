@@ -43,7 +43,8 @@ for package in "$DOWNLOADS"/*.deb; do
   dpkg-deb -x "$package" "$PG_ROOT"
 done
 
-export PATH="$PG_ROOT/usr/lib/postgresql/18/bin:$PATH"
+export PG18_BIN="$PG_ROOT/usr/lib/postgresql/18/bin"
+export PATH="$PG18_BIN:$PATH"
 export LD_LIBRARY_PATH="$PG_ROOT/usr/lib/x86_64-linux-gnu${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 export CF2_GATE_RUN_ID="$RUN_ID"
 export CF2_GATE_WORK_DIR="$WORK"
