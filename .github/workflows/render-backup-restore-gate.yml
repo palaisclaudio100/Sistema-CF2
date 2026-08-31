@@ -1,0 +1,248 @@
+name: CF2 Backup Restore Gate
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - '.github/workflows/render-backup-restore-gate.yml'
+      - '.github/cf2-gates/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backup-restore-gate:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[run cf2 backup gate]')
+    runs-on: ubuntu-latest
+    env:
+      RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+      RENDER_SERVICE_ID: srv-daa8dngae00c73a3m15g
+      RENDER_PLAN_ID: plan-srv-006
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Create and monitor the single authorized Render job
+        env:
+          GATE_COMMIT: ${{ github.sha }}
+          GATE_REPOSITORY: ${{ github.repository }}
+        run: |
+          python3 - <<'PY'
+          import datetime
+          import hashlib
+          import json
+          import os
+          import pathlib
+          import re
+          import sys
+          import time
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+
+          API = "https://api.render.com/v1"
+          TOKEN = os.environ.get("RENDER_API_KEY")
+          SERVICE = os.environ["RENDER_SERVICE_ID"]
+          PLAN = os.environ["RENDER_PLAN_ID"]
+          COMMIT = os.environ["GATE_COMMIT"]
+          REPOSITORY = os.environ["GATE_REPOSITORY"]
+          RESULT_FILE = pathlib.Path("cf2-gate-evidence.json")
+          SUMMARY_FILE = pathlib.Path(os.environ["GITHUB_STEP_SUMMARY"])
+          CREATED_AT = datetime.datetime.now(datetime.timezone.utc)
+
+          def sanitized_failure(reason, **extra):
+              evidence = {"result": "FAIL", "reason": reason, **extra}
+              RESULT_FILE.write_text(json.dumps(evidence, indent=2) + "\n", encoding="utf-8")
+              SUMMARY_FILE.write_text(f"## CF2 Backup Restore Gate\n\n`FAIL`: {reason}\n", encoding="utf-8")
+              raise SystemExit(0)
+
+          if not TOKEN:
+              sanitized_failure("SECRET_MISSING")
+
+          def request(method, path, payload=None, *, timeout=45):
+              data = None if payload is None else json.dumps(payload).encode("utf-8")
+              req = urllib.request.Request(
+                  f"{API}{path}", data=data, method=method,
+                  headers={"Accept": "application/json", "Content-Type": "application/json", "Authorization": f"Bearer {TOKEN}"},
+              )
+              with urllib.request.urlopen(req, timeout=timeout) as response:
+                  body = response.read()
+                  return None if not body else json.loads(body)
+
+          def wrapped_names(items, wrapper):
+              names = set()
+              for item in items if isinstance(items, list) else []:
+                  value = item.get(wrapper, item) if isinstance(item, dict) else {}
+                  if isinstance(value, dict) and isinstance(value.get("name"), str):
+                      names.add(value["name"])
+              return names
+
+          def sha256(file):
+              return hashlib.sha256(pathlib.Path(file).read_bytes()).hexdigest()
+
+          def unwrap(value, wrapper="job"):
+              if isinstance(value, dict) and isinstance(value.get(wrapper), dict):
+                  return value[wrapper]
+              return value if isinstance(value, dict) else {}
+
+          owners = request("GET", "/owners?limit=100")
+          owner = next((item.get("owner", item) for item in owners if item.get("owner", item).get("name") == "My Workspace"), None)
+          if not owner:
+              sanitized_failure("WORKSPACE_NOT_FOUND")
+          owner_id = owner["id"]
+
+          services_before = request("GET", "/services?limit=100")
+          postgres_before = request("GET", "/postgres?limit=100")
+          service_names_before = wrapped_names(services_before, "service")
+          postgres_names_before = wrapped_names(postgres_before, "postgres")
+          if "cf2-prod-core" not in service_names_before or "cf2-prod-postgres" not in postgres_names_before:
+              sanitized_failure("PRODUCTION_RESOURCES_NOT_FOUND")
+
+          deploys_before = request("GET", f"/services/{SERVICE}/deploys?limit=1")
+          deploy_before = deploys_before[0].get("deploy", deploys_before[0]) if deploys_before else {}
+          deploy_before_id = deploy_before.get("id")
+
+          gate_file = ".github/cf2-gates/backup-restore-gate.mjs"
+          runner_file = ".github/cf2-gates/run-backup-restore-gate.sh"
+          gate_hash = sha256(gate_file)
+          runner_hash = sha256(runner_file)
+          raw_root = f"https://raw.githubusercontent.com/{REPOSITORY}/{COMMIT}/.github/cf2-gates"
+          marker = f"CF2_GATE_COMMIT={COMMIT}"
+          start_command = f"""set -eu
+          {marker}
+          LOADER_ROOT=/tmp/cf2-gate-loader-{COMMIT[:12]}
+          mkdir -m 700 -p \"$LOADER_ROOT\"
+          trap 'rm -rf -- \"$LOADER_ROOT\"' EXIT HUP INT TERM
+          curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 '{raw_root}/run-backup-restore-gate.sh' -o \"$LOADER_ROOT/run.sh\"
+          printf '%s  %s\\n' '{runner_hash}' \"$LOADER_ROOT/run.sh\" | sha256sum --check --status
+          curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 '{raw_root}/backup-restore-gate.mjs' -o \"$LOADER_ROOT/gate.mjs\"
+          printf '%s  %s\\n' '{gate_hash}' \"$LOADER_ROOT/gate.mjs\" | sha256sum --check --status
+          chmod 700 \"$LOADER_ROOT/run.sh\"
+          CF2_GATE_SCRIPT=\"$LOADER_ROOT/gate.mjs\" \"$LOADER_ROOT/run.sh\""""
+
+          payload = {"planId": PLAN, "startCommand": start_command}
+          job = None
+          post_ambiguous = False
+          try:
+              job = request("POST", f"/services/{SERVICE}/jobs", payload, timeout=60)
+          except urllib.error.HTTPError as error:
+              sanitized_failure(f"JOB_CREATE_HTTP_{error.code}")
+          except (urllib.error.URLError, TimeoutError):
+              post_ambiguous = True
+
+          if post_ambiguous:
+              created_after = urllib.parse.quote((CREATED_AT - datetime.timedelta(minutes=2)).isoformat())
+              candidates = request("GET", f"/services/{SERVICE}/jobs?limit=20&createdAfter={created_after}")
+              matches = [unwrap(item) for item in candidates if marker in unwrap(item).get("startCommand", "")]
+              if len(matches) != 1:
+                  sanitized_failure("JOB_CREATE_AMBIGUOUS", matching_jobs=len(matches))
+              job = matches[0]
+
+          job = unwrap(job)
+          job_id = job.get("id")
+          if not job_id:
+              sanitized_failure("JOB_ID_MISSING")
+
+          deadline = time.monotonic() + 900
+          terminal = {"succeeded", "failed", "canceled"}
+          job_state = job
+          while job_state.get("status") not in terminal and time.monotonic() < deadline:
+              time.sleep(5)
+              job_state = unwrap(request("GET", f"/services/{SERVICE}/jobs/{job_id}"))
+
+          if job_state.get("status") not in terminal:
+              try:
+                  request("POST", f"/services/{SERVICE}/jobs/{job_id}/cancel", {})
+              except Exception:
+                  pass
+              sanitized_failure("JOB_TIMEOUT_CANCELED", job_id=job_id)
+
+          result_line = None
+          log_deadline = time.monotonic() + 120
+          while result_line is None and time.monotonic() < log_deadline:
+              params = urllib.parse.urlencode({
+                  "ownerId": owner_id,
+                  "resource": job_id,
+                  "direction": "backward",
+                  "limit": 100,
+                  "startTime": (CREATED_AT - datetime.timedelta(minutes=2)).isoformat(),
+                  "endTime": (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=2)).isoformat(),
+              })
+              logs = request("GET", f"/logs?{params}")
+              entries = logs.get("logs", logs if isinstance(logs, list) else [])
+              for entry in entries:
+                  message = entry.get("message", entry.get("text", "")) if isinstance(entry, dict) else ""
+                  match = re.search(r"CF2_BACKUP_RESTORE_GATE_RESULT=(\{.*\})", message)
+                  if match:
+                      result_line = match.group(1)
+                      break
+              if result_line is None:
+                  time.sleep(5)
+
+          if result_line is None:
+              sanitized_failure("FAIL_EVIDENCE_MISSING", job_id=job_id, job_status=job_state.get("status"))
+          try:
+              gate = json.loads(result_line)
+          except json.JSONDecodeError:
+              sanitized_failure("EVIDENCE_JSON_INVALID", job_id=job_id)
+
+          services_after = request("GET", "/services?limit=100")
+          postgres_after = request("GET", "/postgres?limit=100")
+          deploys_after = request("GET", f"/services/{SERVICE}/deploys?limit=1")
+          deploy_after = deploys_after[0].get("deploy", deploys_after[0]) if deploys_after else {}
+          production_intact = (
+              wrapped_names(services_after, "service") == service_names_before
+              and wrapped_names(postgres_after, "postgres") == postgres_names_before
+              and deploy_after.get("id") == deploy_before_id
+              and "cf2-prod-core" in wrapped_names(services_after, "service")
+              and "cf2-prod-postgres" in wrapped_names(postgres_after, "postgres")
+          )
+          final_pass = job_state.get("status") == "succeeded" and gate.get("result") == "PASS" and production_intact
+          evidence = {
+              "workflow_commit": COMMIT,
+              "job_id": job_id,
+              "job_status": job_state.get("status"),
+              "job_created_at": job_state.get("createdAt"),
+              "job_started_at": job_state.get("startedAt"),
+              "job_finished_at": job_state.get("finishedAt"),
+              "production_intact": production_intact,
+              "gate": gate,
+              "back_up_restore_test": "PASS" if final_pass else "FAIL",
+          }
+          RESULT_FILE.write_text(json.dumps(evidence, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+          with SUMMARY_FILE.open("a", encoding="utf-8") as summary:
+              summary.write("## CF2 Backup Restore Gate\n\n")
+              summary.write(f"- Job: `{job_id}`\n")
+              summary.write(f"- Job status: `{job_state.get('status')}`\n")
+              summary.write(f"- Source read-only: `{gate.get('source_read_only')}`\n")
+              summary.write(f"- Dump SHA-256: `{gate.get('dump_sha256')}`\n")
+              summary.write(f"- Dump bytes: `{gate.get('dump_bytes')}`\n")
+              summary.write(f"- Restore exit: `{gate.get('restore_exit')}`\n")
+              summary.write(f"- Production intact: `{production_intact}`\n")
+              summary.write(f"- **BACKUP_RESTORE_TEST: {'PASS' if final_pass else 'FAIL'}**\n")
+          PY
+
+      - name: Upload sanitized gate evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cf2-backup-restore-gate-evidence-${{ github.run_id }}
+          path: cf2-gate-evidence.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Enforce gate result
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import json
+          with open("cf2-gate-evidence.json", encoding="utf-8") as source:
+              evidence = json.load(source)
+          if evidence.get("back_up_restore_test") != "PASS":
+              raise SystemExit(1)
+          print("BACKUP_RESTORE_TEST: PASS")
+          PY
