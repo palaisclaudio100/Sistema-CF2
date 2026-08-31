@@ -1,0 +1,85 @@
+name: CF2 Render auth check
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - '.github/workflows/render-auth-check.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  render-auth-check:
+    runs-on: ubuntu-latest
+    env:
+      RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+    steps:
+      - name: Verify read-only Render access
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import sys
+          import urllib.error
+          import urllib.request
+
+          API_ROOT = "https://api.render.com/v1"
+
+          def fail(reason):
+              print("GITHUB_RENDER_EXECUTOR_AUTH: FAIL")
+              print(f"reason={reason}")
+              raise SystemExit(1)
+
+          token = os.environ.get("RENDER_API_KEY")
+          if not token:
+              fail("SECRET_MISSING")
+
+          def get_json(path):
+              request = urllib.request.Request(
+                  f"{API_ROOT}{path}",
+                  headers={
+                      "Accept": "application/json",
+                      "Authorization": f"Bearer {token}",
+                  },
+                  method="GET",
+              )
+              try:
+                  with urllib.request.urlopen(request, timeout=30) as response:
+                      return json.load(response)
+              except urllib.error.HTTPError as error:
+                  fail(f"HTTP_{error.code}")
+              except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
+                  fail("API_REQUEST_FAILED")
+
+          def names(items, wrapper):
+              found = set()
+              if not isinstance(items, list):
+                  fail("UNEXPECTED_RESPONSE_SHAPE")
+              for item in items:
+                  if not isinstance(item, dict):
+                      continue
+                  value = item.get(wrapper, item)
+                  if isinstance(value, dict) and isinstance(value.get("name"), str):
+                      found.add(value["name"])
+              return found
+
+          owners = names(get_json("/owners?limit=100"), "owner")
+          services = names(get_json("/services?limit=100"), "service")
+          postgres = names(get_json("/postgres?limit=100"), "postgres")
+
+          if "My Workspace" not in owners:
+              fail("WORKSPACE_NOT_FOUND")
+          if "cf2-prod-core" not in services:
+              fail("CORE_NOT_FOUND")
+          if "cf2-prod-postgres" not in postgres:
+              fail("POSTGRES_NOT_FOUND")
+
+          print("GITHUB_RENDER_EXECUTOR_AUTH: PASS")
+          print("workspace: My Workspace — FOUND")
+          print("cf2-prod-core — FOUND")
+          print("cf2-prod-postgres — FOUND")
+          PY
