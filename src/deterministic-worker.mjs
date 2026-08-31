@@ -4,7 +4,7 @@ export class WorkerExecutionError extends Error { constructor(code,{transient=fa
 
 /** DEV-only event/timer-driven harness. It has no adapter, network or agent dependency. */
 export class DeterministicWorker {
-  constructor(store,{worker_id='WORKER:DEV',lease_ms=30000,max_attempts=3,base_delay_ms=1000,max_delay_ms=60000,max_window_ms=300000,jitter_bound_ms=250}={}) { this.store=store; this.worker_id=worker_id; this.lease_ms=lease_ms; this.max_attempts=max_attempts; this.base_delay_ms=base_delay_ms; this.max_delay_ms=max_delay_ms; this.max_window_ms=max_window_ms; this.jitter_bound_ms=jitter_bound_ms; }
+  constructor(store,{worker_id='WORKER:DEV',lease_ms=30000,max_attempts=3,base_delay_ms=1000,max_delay_ms=60000,max_window_ms=300000,jitter_bound_ms=250,replication_service=null}={}) { this.store=store; this.worker_id=worker_id; this.lease_ms=lease_ms; this.max_attempts=max_attempts; this.base_delay_ms=base_delay_ms; this.max_delay_ms=max_delay_ms; this.max_window_ms=max_window_ms; this.jitter_bound_ms=jitter_bound_ms; this.replication_service=replication_service; }
   #systemCommand(command_type,payload,at,job_id) { return {command_id:`CMD:WORKER:${crypto.randomUUID()}`,command_type,actor_id:this.worker_id,actor_role:'WORKER_DETERMINISTIC',issued_at:at,idempotency_key:`${job_id}:${command_type}`,payload}; }
   #jitter(job) { if(!this.jitter_bound_ms) return 0; return crypto.createHash('sha256').update(`${job.job_id}:${job.attempt}`).digest().readUInt16BE(0)%this.jitter_bound_ms; }
   reconcile(at) { const leases=this.store.recoverExpiredLeases(at); const timers=this.store.fireDueTimers(at); const dispatched=this.store.dispatchPendingOutbox(at); return {dispatched,leases,timers}; }
@@ -22,6 +22,7 @@ export class DeterministicWorker {
     if (job.job_type==='INVALIDATE_CONDITIONAL') { const result=this.store.submitCommand(this.#systemCommand('INVALIDATE_VERIFICATION',payload,at,job.job_id)); if(!result.accepted) throw new WorkerExecutionError(result.reason_code); return {kind:'INVALIDATE_CONDITIONAL',result}; }
     if (job.job_type==='DEV_FAIL_ONCE') { if (job.attempt<=Number(payload.fail_attempts ?? 1)) throw new WorkerExecutionError('DEV_TRANSIENT_FAILURE',{transient:true}); return {kind:'DEV_FAIL_ONCE',recovered:true}; }
     if (job.job_type==='DEV_PERMANENT_FAILURE') throw new WorkerExecutionError('INVALID_SCHEMA');
+    if (job.job_type==='REQUEST_REPLICATION') { if(!this.replication_service) throw new WorkerExecutionError('ADAPTER_NOT_CONFIGURED'); const result=this.replication_service.replicate(payload); if(result.status!=='SYNC_VERIFIED') throw new WorkerExecutionError(result.reason_code,{transient:result.retryable===true}); return {kind:'REPLICATION',proof_id:result.proof_id,status:result.status}; }
     if (job.job_type==='NOOP') return {kind:'NOOP',noop:true};
     throw new WorkerExecutionError(`UNSUPPORTED_JOB:${job.job_type}`);
   }
