@@ -1,0 +1,40 @@
+name: CF2 Stage5 cloud gate infrastructure
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  create-staging-service:
+    runs-on: ubuntu-latest
+    env:
+      RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+    steps:
+      - name: Create isolated Free staging service if absent
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.request, urllib.error
+          API='https://api.render.com/v1'; token=os.environ.get('RENDER_API_KEY')
+          def call(method,path,payload=None):
+            req=urllib.request.Request(API+path,data=None if payload is None else json.dumps(payload).encode(),method=method,headers={'Accept':'application/json','Content-Type':'application/json','Authorization':f'Bearer {token}'})
+            with urllib.request.urlopen(req,timeout=45) as r: return json.load(r)
+          if not token: raise SystemExit('SECRET_MISSING')
+          owners=call('GET','/owners?limit=100'); owner=next((x.get('owner',x) for x in owners if x.get('owner',x).get('name')=='My Workspace'),None)
+          if not owner: raise SystemExit('WORKSPACE_NOT_FOUND')
+          services=call('GET','/services?limit=100'); existing=[x.get('service',x) for x in services if x.get('service',x).get('name')=='cf2-stage5-role-gate']
+          if existing: service=existing[0]
+          else:
+            payload={'type':'web_service','name':'cf2-stage5-role-gate','ownerId':owner['id'],'repo':'https://github.com/palaisclaudio100/Sistema-CF2','branch':'master','autoDeploy':'no','envVars':[{'key':'NODE_ENV','value':'staging'},{'key':'STAGE5_PROVISIONAL_FOLDER_ID','value':'1aS6hOR_V3iW5swYPtWOF8XeeLDcyqB2H'},{'key':'STAGE5_PROVISIONAL_REQUEST_ID','value':'1Bhvk22HKJS0EPGW4167y4lwTlGbs_4F6'},{'key':'STAGE5_PROVISIONAL_RESPONSE_ID','value':'1MeHNxp0tfHicbJu-ApnrVRlGy_6UTXda'}],'serviceDetails':{'env':'node','plan':'free','region':'oregon','buildCommand':'pnpm install --frozen-lockfile','startCommand':'node src/stage5-cloud-gate-server.mjs','healthCheckPath':'/healthz','numInstances':1}}
+            try: created=call('POST','/services',payload)
+            except urllib.error.HTTPError as e:
+              if e.code==402: raise SystemExit('COST_AUTHORIZATION_REQUIRED')
+              raise
+            service=created.get('service',created)
+          details=service.get('serviceDetails',{})
+          if details.get('plan',service.get('plan'))!='free': raise SystemExit('FREE_PLAN_UNAVAILABLE')
+          print('STAGE5_SERVICE_ID='+service['id'])
+          print('STAGE5_SERVICE_URL='+details.get('url',service.get('url','')))
+          print('STAGE5_PLAN=free')
+          PY
