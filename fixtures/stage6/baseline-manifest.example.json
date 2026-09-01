@@ -1,0 +1,12 @@
+{
+  "source_manifest_ref": "CF1:BASELINE:EXAMPLE",
+  "artifacts": [
+    {"ref": "CF1:CURRENT:EXAMPLE", "path": "current-source.example.md"}
+  ],
+  "entities": [],
+  "decisions": [],
+  "tasks": [],
+  "relations": [],
+  "catalog_memberships": [],
+  "mappings": []
+}
