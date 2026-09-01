@@ -32,3 +32,13 @@ autorización para importar datos de ejemplo.
 --baseline=<baseline.json> --current=<cf2-logical-state.json>` añade una observación
 únicamente al Core CF2 indicado. Reabrir el mismo `session` conserva el inicio original;
 no reinicia la ventana de 24 horas ni ejecuta adaptadores.
+
+## Ledger de revisión
+
+`node scripts/stage6-resolve-unknowns.mjs --ledger=<review-ledger.json>
+--store=<core-dev.db>` es el único importador de baseline. El ledger debe enlazarse al
+`baseline_digest` sellado y clasificar cada hallazgo con `evidence_ref`. Sólo registros
+`AUTHORITATIVE_CURRENT` con un comando CF2 completo pueden entrar al store; los demás
+quedan como `CANDIDATE`, `CONFLICT` o `UNKNOWN`. El importador nunca escribe CF1 y no
+puede declarar F7: siempre devuelve `NOT_EVALUATED` hasta que la soak y la revisión se
+acrediten por separado.
