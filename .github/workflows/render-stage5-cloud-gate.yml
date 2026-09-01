@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
-      GATE_COMMIT: ${{ github.sha }}
+      GATE_COMMIT: 1ae9e99fa5723a1ecba88841a411519d19f8c889
     steps:
       - name: Deploy exact commit to exact isolated Free staging service
         run: |
@@ -54,15 +54,18 @@ jobs:
           _,env_rows=call('GET',f'/services/{STAGING_ID}/env-vars')
           env_keys={row.get('envVar',row).get('key') for row in env_rows}
           if {'DATABASE_URL','CF2_DATABASE_URL'} & env_keys: raise SystemExit('PRODUCTION_DATABASE_BINDING_PRESENT')
-          deploy=find_target_deploy()
-          if not deploy:
-            try:
-              status,created=call('POST',f'/services/{STAGING_ID}/deploys',{'commitId':TARGET_COMMIT})
-              if status not in (201,202): raise SystemExit('DEPLOY_CREATE_STATUS_INVALID')
-              deploy=deploy_from(created)
-            except (urllib.error.URLError,TimeoutError):
-              deploy=find_target_deploy()
-              if not deploy: raise SystemExit('DEPLOY_RESULT_AMBIGUOUS_NO_RETRY')
+          _,_=call('PUT',f'/services/{STAGING_ID}/env-vars/STAGE5_PUBLIC_URL',{'value':'https://cf2-stage5-role-gate.onrender.com'})
+          _,configured_public_url=call('GET',f'/services/{STAGING_ID}/env-vars/STAGE5_PUBLIC_URL')
+          if not configured_public_url: raise SystemExit('STAGE5_PUBLIC_URL_MISSING_AFTER_PUT')
+          for required_key in {'GOOGLE_OAUTH_CLIENT_ID','GOOGLE_OAUTH_CLIENT_SECRET','NODE_ENV'}:
+            if required_key not in env_keys: raise SystemExit('REQUIRED_STAGING_ENV_MISSING')
+          try:
+            status,created=call('POST',f'/services/{STAGING_ID}/deploys',{'commitId':TARGET_COMMIT})
+            if status not in (201,202): raise SystemExit('DEPLOY_CREATE_STATUS_INVALID')
+            deploy=deploy_from(created)
+          except (urllib.error.URLError,TimeoutError):
+            deploy=find_target_deploy()
+            if not deploy: raise SystemExit('DEPLOY_RESULT_AMBIGUOUS_NO_RETRY')
           deploy_id=deploy.get('id')
           if not deploy_id: raise SystemExit('DEPLOY_ID_MISSING')
           deadline=time.time()+900
