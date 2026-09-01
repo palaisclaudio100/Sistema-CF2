@@ -57,8 +57,10 @@ jobs:
           _,_=call('PUT',f'/services/{STAGING_ID}/env-vars/STAGE5_PUBLIC_URL',{'value':'https://cf2-stage5-role-gate.onrender.com'})
           _,configured_public_url=call('GET',f'/services/{STAGING_ID}/env-vars/STAGE5_PUBLIC_URL')
           if not configured_public_url: raise SystemExit('STAGE5_PUBLIC_URL_MISSING_AFTER_PUT')
+          _,env_rows_after=call('GET',f'/services/{STAGING_ID}/env-vars')
+          env_keys_after={row.get('envVar',row).get('key') for row in env_rows_after}
           for required_key in {'GOOGLE_OAUTH_CLIENT_ID','GOOGLE_OAUTH_CLIENT_SECRET','NODE_ENV'}:
-            if required_key not in env_keys: raise SystemExit('REQUIRED_STAGING_ENV_MISSING')
+            if required_key not in env_keys_after: raise SystemExit('REQUIRED_STAGING_ENV_MISSING')
           try:
             status,created=call('POST',f'/services/{STAGING_ID}/deploys',{'commitId':TARGET_COMMIT})
             if status not in (201,202): raise SystemExit('DEPLOY_CREATE_STATUS_INVALID')
