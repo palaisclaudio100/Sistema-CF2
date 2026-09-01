@@ -8,6 +8,8 @@ falla cerrado: nunca se importa una lectura truncada.
 Los datos se clasifican antes de importarse. Sólo `AUTHORITATIVE_CURRENT` que posea
 evidencia y un comando CF2 válido entra al Core. `CANDIDATE`, `CONFLICT` y `UNKNOWN`
 permanecen explícitos en el informe; no son falsos ni se convierten en CURRENT.
+La cobertura de cada colección empieza como `UNKNOWN`; una lista vacía no acredita
+que esa colección esté vacía hasta que una extracción tipada la marque explícitamente.
 
 Los mappings deben contener `artifact_id`, `A_path`, `C_file_id` exacto,
 `A_TO_C_EXACT_ID` y `byte_preserving=true`. No existe búsqueda por nombre.

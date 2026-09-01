@@ -6,6 +6,7 @@ const now = () => new Date().toISOString();
 const EMPTY = Object.freeze({status:'UNKNOWN', reason_code:'UNKNOWN'});
 export const CLASSIFICATIONS = new Set(['AUTHORITATIVE_CURRENT','CANDIDATE','CONFLICT','UNKNOWN']);
 export const SHADOW_MINIMUM_SOAK_MS = 24 * 60 * 60 * 1000;
+const BASELINE_COLLECTIONS = ['entities','decisions','tasks','relations','catalog_memberships','mappings','surfaces'];
 
 function fail(code, message = code) { const error = new Error(message); error.reason_code = code; throw error; }
 function stable(value) { if (Array.isArray(value)) return value.map(stable); if (value && typeof value === 'object') return Object.fromEntries(Object.keys(value).sort().map(key => [key, stable(value[key])])); return value; }
@@ -29,12 +30,22 @@ function exactMapping(mapping) {
   return Object.freeze({...mapping, B_path:mapping.B_path ?? null});
 }
 
+function coverageFor(coverage={}) {
+  const resolved={};
+  for (const collection of BASELINE_COLLECTIONS) {
+    const classification=coverage[collection] ?? 'UNKNOWN';
+    if (!CLASSIFICATIONS.has(classification)) fail('INVALID_BASELINE_COVERAGE', collection);
+    resolved[collection]=classification;
+  }
+  return Object.freeze(resolved);
+}
+
 /** Read-only CF1 baseline builder. Explicit sources only; no automatic discovery. */
-export function createMigrationBaseline({artifacts=[],schedulers=[],mappings=[],tasks=[],decisions=[],surfaces=[],entities=[],relations=[],catalog_memberships=[],source_manifest_ref=null,at=now(),maxSourceBytes=8*1024*1024}={}) {
+export function createMigrationBaseline({artifacts=[],schedulers=[],mappings=[],tasks=[],decisions=[],surfaces=[],entities=[],relations=[],catalog_memberships=[],coverage={},source_manifest_ref=null,at=now(),maxSourceBytes=8*1024*1024}={}) {
   if (!Number.isSafeInteger(maxSourceBytes) || maxSourceBytes < 1) fail('INVALID_BASELINE_MANIFEST');
   const sealed=artifacts.map(item=>sealArtifact(item,{maxSourceBytes})), refs=sealed.map(item=>item.ref);
   if (new Set(refs).size!==refs.length) fail('DUPLICATE_SOURCE_REF');
-  const baseline={kind:'MIGRATION_BASELINE',mode:'CF1_READ_ONLY',no_side_effect:true,baseline_at:at,source_manifest_ref,artifacts:sealed,schedulers:[...schedulers],mappings:mappings.map(exactMapping),entities:[...entities],decisions:[...decisions],tasks:[...tasks],relations:[...relations],catalog_memberships:[...catalog_memberships],surfaces:[...surfaces]};
+  const baseline={kind:'MIGRATION_BASELINE',mode:'CF1_READ_ONLY',no_side_effect:true,baseline_at:at,source_manifest_ref,coverage:coverageFor(coverage),artifacts:sealed,schedulers:[...schedulers],mappings:mappings.map(exactMapping),entities:[...entities],decisions:[...decisions],tasks:[...tasks],relations:[...relations],catalog_memberships:[...catalog_memberships],surfaces:[...surfaces]};
   return Object.freeze({...baseline,baseline_digest:fingerprint(baseline)});
 }
 
