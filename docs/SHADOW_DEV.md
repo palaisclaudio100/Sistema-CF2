@@ -25,3 +25,8 @@ en stdout. El manifiesto define cada path de CF1 de forma explícita y relativa 
 mismo; el script no recorre directorios ni escribe en CF1. El ejemplo de estructura
 está en `fixtures/stage6/baseline-manifest.example.json`; no es una fuente CF1 ni una
 autorización para importar datos de ejemplo.
+
+`node scripts/stage6-shadow-observe.mjs --store=<core-dev.db> --session=<id>
+--baseline=<baseline.json> --current=<cf2-logical-state.json>` añade una observación
+únicamente al Core CF2 indicado. Reabrir el mismo `session` conserva el inicio original;
+no reinicia la ventana de 24 horas ni ejecuta adaptadores.
