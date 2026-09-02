@@ -3,8 +3,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { CoreStore } from './core-store.mjs';
+import { RoleInterface } from './role-interface.mjs';
 
 export const PRODUCTION_CUTOVER_DISABLED = true;
+export const MINIMUM_OPERATIONAL_CUTOVER_SCOPE = Object.freeze(['TASK','VERIFICATION']);
 export const WRITERS = Object.freeze({ CF1: 'CF1_WRITER', LOCKED: 'TRANSITION_LOCKED', CF2: 'CF2_WRITER', ROLLBACK: 'ROLLBACK_LOCKED' });
 const now = () => new Date().toISOString();
 const clone = value => structuredClone(value);
@@ -90,4 +92,20 @@ export function runStagingDrill({ at = now } = {}) {
   } finally { fs.rmSync(lab, { recursive: true, force: true }); }
   barrier.lock('RELATION'); barrier.handoffToCF2('RELATION', decision); barrier.rollbackR2('RELATION', r2);
   return { kind: 'STAGING_CUTOVER_DRILL', environment: 'STAGING', production_cutover_disabled: PRODUCTION_CUTOVER_DISABLED, delta, equality, decision, r2_restore: r2, writers: Object.fromEntries(scope.map(domain => [domain, barrier.writer(domain)])), journal: journal.export(), zero_production_side_effect: true };
+}
+
+/** Staging-only rehearsal of the first relay-free capability: command, task, verification and closure. */
+export function runMinimumOperationalRehearsal({ at = now } = {}) {
+  const journal=new CutoverJournal({at}),scope=[...MINIMUM_OPERATIONAL_CUTOVER_SCOPE],barrier=new SingleWriterBarrier({environment:'STAGING',journal});barrier.register(scope);
+  const decision=createCutoverDecision({decision_id:'CUTOVER_DECISION:STAGING:MINIMUM',scope,effective_at:at(),baseline_id:'BASELINE:STAGING:MINIMUM',release_id:'RELEASE:STAGING:MINIMUM',approved_by:'CLAUDIO_PALAIS_SIMULATION',previous_writer:WRITERS.CF1,new_writer:WRITERS.CF2,equality_check_ref:'EQUALITY:STAGING:MINIMUM',rollback_plan_ref:'RUNBOOK:R0-R2',status:'APPROVED_NOT_EXECUTED_SIMULATION',environment:'STAGING'});
+  for(const domain of scope){barrier.lock(domain);barrier.handoffToCF2(domain,decision);}
+  const lab=fs.mkdtempSync(path.join(os.tmpdir(),'cf2-stage7-minimum-'));try{const store=new CoreStore(path.join(lab,'core.db')),roles=new RoleInterface(store,{version:'stage7-staging'}),stamp=at(),taskId='TASK:STAGE7:MINIMUM';
+    store.submitCommand({command_id:'COMMAND:STAGE7:SEED',command_type:'UPSERT_ENTITY',actor_id:'ACTOR:STAGING',actor_role:'STAGING',issued_at:stamp,idempotency_key:'stage7-seed',payload:{object:{id:'ENTITY:STAGE7:MINIMUM',type:'ENTITY',status:'CURRENT',created_at:stamp,updated_at:stamp,basis_ref:['STAGING'],entity_kind:'DRILL',canonical_name:'Minimum cutover',aliases:[]}}});
+    const gabyChat=roles.client('dev-credential-gaby-chat'),gabyCw=roles.client('dev-credential-gaby-cw'),dga=roles.client('dev-credential-dga');
+    const task=gabyChat.submitCommand({command_id:'COMMAND:STAGE7:TASK',command_type:'CREATE_TASK',actor_id:'ACTOR:GABY_CHAT',actor_role:'GABY_CHAT',issued_at:stamp,idempotency_key:'stage7-task',payload:{object:{id:taskId,type:'TASK',status:'OPEN',created_at:stamp,updated_at:stamp,basis_ref:['STAGING'],action:'STAGING_ROLE_GATE',state:'OPEN',responsible_role:'GABY_CHAT',related_ids:['ENTITY:STAGE7:MINIMUM']}}});
+    const verification=gabyCw.submitCommand({command_id:'COMMAND:STAGE7:VERIFY',command_type:'RECORD_VERIFICATION',actor_id:'ACTOR:GABY_CW',actor_role:'GABY_CW',issued_at:stamp,idempotency_key:'stage7-verification',payload:{object:{id:'VERIFICATION:STAGE7:CLOSURE',type:'VERIFICATION',status:'CURRENT',created_at:stamp,updated_at:stamp,basis_ref:['STAGING'],subject_id:taskId,attribute:'CLOSURE_EVIDENCE',value:true,class:'FIJO',verified_at:stamp,verified_by:'ACTOR:GABY_CW',evidence_ref:'PROOF:STAGE7:CLOSURE'}}});
+    const premature=gabyChat.submitCommand({command_id:'COMMAND:STAGE7:DONE:PREMATURE',command_type:'TRANSITION_TASK',actor_id:'ACTOR:GABY_CHAT',actor_role:'GABY_CHAT',issued_at:stamp,idempotency_key:'stage7-done-premature',payload:{task_id:taskId,state:'DONE',closure_ref:'PROOF:STAGE7:CLOSURE'}});
+    store.registerDevProof('PROOF:STAGE7:CLOSURE',{staging_only:true});const done=gabyChat.submitCommand({command_id:'COMMAND:STAGE7:DONE',command_type:'TRANSITION_TASK',actor_id:'ACTOR:GABY_CHAT',actor_role:'GABY_CHAT',issued_at:stamp,idempotency_key:'stage7-done',payload:{task_id:taskId,state:'DONE',closure_ref:'PROOF:STAGE7:CLOSURE'}});const status=dga.request('READ_COMMAND_STATUS',{command_id:'COMMAND:STAGE7:DONE'});
+    const result={kind:'MINIMUM_OPERATIONAL_CUTOVER_REHEARSAL',environment:'STAGING',scope,decision,role_path:{task,verification,premature,done,status},claudio_relay_required:false,codex_runtime_required:false,no_side_effect:true,production_cutover_disabled:PRODUCTION_CUTOVER_DISABLED};store.close();for(const domain of scope)barrier.rollbackR1(domain,['STAGING_ONLY']);return {...result,writers:Object.fromEntries(scope.map(domain=>[domain,barrier.writer(domain)])),journal:journal.export()};
+  }finally{fs.rmSync(lab,{recursive:true,force:true});}
 }
