@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import {enrollmentPage} from './role-enrollment.mjs';
 
 export const OAUTH_SCOPES=Object.freeze(['openid','email','profile']);
 export const ROLE_PRINCIPALS=Object.freeze({
@@ -11,6 +12,7 @@ const b64url=value=>Buffer.from(value,'base64url');
 const fingerprint=sub=>crypto.createHash('sha256').update(`google:${sub}`).digest('hex');
 const sessionHash=token=>crypto.createHash('sha256').update(token).digest('hex');
 const json=(response,status,value,headers={})=>response.writeHead(status,{'content-type':'application/json','cache-control':'no-store',...headers}).end(JSON.stringify(value));
+const html=(response,value)=>response.writeHead(200,{'content-type':'text/html; charset=utf-8','cache-control':'no-store','referrer-policy':'no-referrer','content-security-policy':"default-src 'none'; script-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"}).end(value);
 const cookie=request=>Object.fromEntries((request.headers.cookie??'').split(';').map(part=>part.trim()).filter(Boolean).map(part=>{const i=part.indexOf('=');return i<0?[part,'']:[part.slice(0,i),part.slice(i+1)];}));
 const safeEqual=(left,right)=>{const a=Buffer.from(left??''),b=Buffer.from(right??'');return a.length===b.length&&crypto.timingSafeEqual(a,b);};
 
@@ -50,30 +52,40 @@ export class GoogleOpenIdClient{
 }
 
 export class ProductionRoleGateway{
-  constructor(store,{clientId,clientSecret,baseUrl,bindings,fetchImpl,clock=()=>Date.now()}={}){
+  constructor(store,{clientId,clientSecret,baseUrl,bindings,enrollments,fetchImpl,clock=()=>Date.now()}={}){
     this.store=store;this.clock=clock;this.states=new Map();this.sessions=new Map();this.authorizer=new RoleAuthorizer(parseRoleBindings(bindings));
+    this.enrollments=enrollments;
     this.oauth=new GoogleOpenIdClient({clientId,clientSecret,redirectUri:`${baseUrl}/oauth/google/callback`,fetchImpl,clock});
   }
-  health(){return{oauth:this.oauth.configured()?'READY':'NOT_READY',binding_count:this.authorizer.bindings.size,scopes:OAUTH_SCOPES,redirect_uri:this.oauth.redirectUri};}
+  health(){return{oauth:this.oauth.configured()?'READY':'NOT_READY',enrollment:this.enrollments?'READY':'NOT_READY',binding_count:this.authorizer.bindings.size,scopes:OAUTH_SCOPES,redirect_uri:this.oauth.redirectUri};}
   #prune(){const now=this.clock();for(const [key,value] of this.states)if(value.expires<=now)this.states.delete(key);for(const [key,value] of this.sessions)if(value.expires<=now||value.revoked)this.sessions.delete(key);}
-  #session(request){this.#prune();const token=cookie(request)['__Host-cf2_role_session'];if(!token)return null;return this.sessions.get(sessionHash(token))??null;}
+  async #session(request){this.#prune();if(request.headers.authorization)return await this.enrollments?.authenticate(request.headers.authorization);const token=cookie(request)['__Host-cf2_role_session'];if(!token)return null;return this.sessions.get(sessionHash(token))??null;}
   async #audit({principal,acting_role,operation,authorized,reason_code,object_id=null}){await this.store.pool.query('INSERT INTO role_gateway_audit(event_id,actor_id,acting_role,operation,authorized,reason_code,object_id,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,now())',[`ROLE_GATE:${crypto.randomUUID()}`,principal?.actor_id??'UNAUTHENTICATED',acting_role??null,operation,authorized,reason_code,object_id]);}
   async #deny(response,status,reason,context={}){await this.#audit({...context,authorized:false,reason_code:reason});return json(response,status,{result:'FAIL_CLOSED',error_code:reason});}
   async handle(request,response,url,readBody){
     if(!url.pathname.startsWith('/oauth/google/')&&!url.pathname.startsWith('/role/'))return false;
+    if(request.method==='GET'&&url.pathname==='/role/enroll')return html(response,enrollmentPage()),true;
+    if(request.method==='POST'&&url.pathname==='/role/enroll/start'){
+      let body;try{body=await readBody(request);if(!body||Array.isArray(body)||typeof body!=='object'||Object.keys(body).length!==1||typeof body.enrollment_token!=='string')throw new Error('ENROLLMENT_INVALID');}catch{return json(response,400,{result:'FAIL_CLOSED',error_code:'ENROLLMENT_INVALID'}),true;}
+      try{const target=await this.enrollments.start(body.enrollment_token),state=crypto.randomBytes(32).toString('base64url'),verifier=crypto.randomBytes(48).toString('base64url'),challenge=crypto.createHash('sha256').update(verifier).digest('base64url'),nonce=crypto.randomBytes(32).toString('base64url');this.states.set(state,{verifier,nonce,enrollment:target,expires:this.clock()+600_000});return json(response,200,{result:'PENDING',authorization_url:this.oauth.authorizationUrl({state,challenge,nonce})}),true;}catch(error){const code=['ENROLLMENT_INVALID','ENROLLMENT_EXPIRED','ENROLLMENT_CONSUMED'].includes(error.message)?error.message:'ENROLLMENT_REJECTED';return json(response,403,{result:'FAIL_CLOSED',error_code:code}),true;}
+    }
+    if(request.method==='POST'&&url.pathname==='/role/token/refresh'){
+      let body;try{body=await readBody(request);if(!body||Array.isArray(body)||typeof body!=='object'||Object.keys(body).length!==1||typeof body.refresh_token!=='string')throw new Error('REFRESH_REJECTED');return json(response,200,{result:'PASS',...await this.enrollments.refresh(body.refresh_token)}),true;}catch{return json(response,401,{result:'FAIL_CLOSED',error_code:'REFRESH_REJECTED'}),true;}
+    }
     if(request.method==='GET'&&url.pathname==='/oauth/google/start'){
       if(!this.oauth.configured())return json(response,503,{result:'OAUTH_NOT_CONFIGURED'}),true;
       this.#prune();const state=crypto.randomBytes(32).toString('base64url'),verifier=crypto.randomBytes(48).toString('base64url'),challenge=crypto.createHash('sha256').update(verifier).digest('base64url'),nonce=crypto.randomBytes(32).toString('base64url');this.states.set(state,{verifier,nonce,expires:this.clock()+600_000});response.writeHead(302,{location:this.oauth.authorizationUrl({state,challenge,nonce}),'cache-control':'no-store'}).end();return true;
     }
     if(request.method==='GET'&&url.pathname==='/oauth/google/callback'){
       const state=url.searchParams.get('state'),entry=this.states.get(state);this.states.delete(state);if(!entry||entry.expires<=this.clock()||!url.searchParams.get('code'))return json(response,400,{result:'FAIL_CLOSED',error_code:'OAUTH_STATE_INVALID'}),true;
-      try{const token=await this.oauth.exchange(url.searchParams.get('code'),entry.verifier),claims=await this.oauth.verify(token,entry.nonce),principal=this.authorizer.principal(claims),principal_fingerprint=fingerprint(claims.sub);if(!principal)return json(response,403,{result:'UNBOUND_PRINCIPAL',principal_fingerprint}),true;const raw=crypto.randomBytes(48).toString('base64url'),csrf=crypto.randomBytes(32).toString('base64url');this.sessions.set(sessionHash(raw),{...principal,csrf,expires:this.clock()+3_600_000,revoked:false});return json(response,200,{result:'OAUTH_PASS',actor_id:principal.actor_id,allowed_roles:principal.allowed_roles,csrf_token:csrf},{'set-cookie':`__Host-cf2_role_session=${raw}; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=3600`}),true;}catch(error){const code=['OAUTH_EXCHANGE_FAILED','ID_TOKEN_MISSING','ID_TOKEN_INVALID','JWKS_UNAVAILABLE'].includes(error?.message)?error.message:'OAUTH_FAILED';return json(response,401,{result:'FAIL_CLOSED',error_code:code}),true;}
+      try{const token=await this.oauth.exchange(url.searchParams.get('code'),entry.verifier),claims=await this.oauth.verify(token,entry.nonce),principal_fingerprint=fingerprint(claims.sub);if(claims.email_verified!==true)throw new Error('ID_TOKEN_INVALID');if(entry.enrollment)return json(response,200,{result:'OAUTH_PASS',...await this.enrollments.consume({...entry.enrollment,human_fingerprint:principal_fingerprint})}),true;const principal=this.authorizer.principal(claims);if(!principal)return json(response,403,{result:'UNBOUND_PRINCIPAL',principal_fingerprint}),true;const raw=crypto.randomBytes(48).toString('base64url'),csrf=crypto.randomBytes(32).toString('base64url');this.sessions.set(sessionHash(raw),{...principal,csrf,auth_kind:'cookie',expires:this.clock()+3_600_000,revoked:false});return json(response,200,{result:'OAUTH_PASS',actor_id:principal.actor_id,allowed_roles:principal.allowed_roles,csrf_token:csrf},{'set-cookie':`__Host-cf2_role_session=${raw}; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=3600`}),true;}catch(error){const code=['OAUTH_EXCHANGE_FAILED','ID_TOKEN_MISSING','ID_TOKEN_INVALID','JWKS_UNAVAILABLE','ENROLLMENT_INVALID','ENROLLMENT_EXPIRED','ENROLLMENT_CONSUMED','ENROLLMENT_ACTOR_MISMATCH'].includes(error?.message)?error.message:'OAUTH_FAILED';return json(response,401,{result:'FAIL_CLOSED',error_code:code}),true;}
     }
-    const session=this.#session(request);if(!session)return await this.#deny(response,401,'AUTHENTICATION_REQUIRED',{operation:url.pathname}),true;
-    if(request.method==='GET'&&url.pathname==='/role/whoami')return json(response,200,{result:'PASS',actor_id:session.actor_id,allowed_roles:session.allowed_roles,csrf_token:session.csrf}),true;
-    if(request.method==='POST'&&url.pathname==='/role/logout'){if(!safeEqual(request.headers['x-cf2-csrf'],session.csrf))return await this.#deny(response,403,'CSRF_REJECTED',{principal:session,operation:'LOGOUT'}),true;session.revoked=true;return json(response,200,{result:'REVOKED'},{'set-cookie':'__Host-cf2_role_session=; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=0'}),true;}
+    const session=await this.#session(request);if(!session)return await this.#deny(response,401,'AUTHENTICATION_REQUIRED',{operation:url.pathname}),true;
+    if(request.method==='GET'&&url.pathname==='/role/whoami')return json(response,200,{result:'PASS',actor_id:session.actor_id,allowed_roles:session.allowed_roles,...(session.auth_kind==='cookie'?{csrf_token:session.csrf}:{})}),true;
+    if(request.method==='POST'&&url.pathname==='/role/token/revoke'){if(session.auth_kind!=='bearer')return await this.#deny(response,403,'TOKEN_REQUIRED',{principal:session,operation:'REVOKE'}),true;try{await this.enrollments.revoke(session.session_id);return json(response,200,{result:'REVOKED'}),true;}catch{return await this.#deny(response,403,'REVOCATION_REJECTED',{principal:session,operation:'REVOKE'}),true;}}
+    if(request.method==='POST'&&url.pathname==='/role/logout'){if(session.auth_kind!=='cookie'||!safeEqual(request.headers['x-cf2-csrf'],session.csrf))return await this.#deny(response,403,'CSRF_REJECTED',{principal:session,operation:'LOGOUT'}),true;session.revoked=true;return json(response,200,{result:'REVOKED'},{'set-cookie':'__Host-cf2_role_session=; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=0'}),true;}
     if(request.method==='POST'&&url.pathname==='/role/objects'){
-      if(!safeEqual(request.headers['x-cf2-csrf'],session.csrf))return await this.#deny(response,403,'CSRF_REJECTED',{principal:session,operation:'WRITE'}),true;
+      if(session.auth_kind==='cookie'&&!safeEqual(request.headers['x-cf2-csrf'],session.csrf))return await this.#deny(response,403,'CSRF_REJECTED',{principal:session,operation:'WRITE'}),true;
       let body;try{body=await readBody(request);if(!body||Array.isArray(body)||typeof body!=='object')throw new Error('INVALID_SCHEMA');}catch{return await this.#deny(response,400,'INVALID_SCHEMA',{principal:session,operation:'WRITE'}),true;}
       if(body.actor_id||body.actor_role||body.object?.actor_id||body.object?.actor_role)return await this.#deny(response,403,'ACTOR_MISMATCH',{principal:session,acting_role:body.acting_role,operation:'WRITE'}),true;
       if(!this.authorizer.authorize(session,body.acting_role))return await this.#deny(response,403,'ROLE_FORBIDDEN',{principal:session,acting_role:body.acting_role,operation:'WRITE'}),true;

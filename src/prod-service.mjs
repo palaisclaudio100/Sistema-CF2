@@ -4,6 +4,7 @@ import {GitHubOidcAuthenticator,CUTOVER_AUDIENCE} from './github-oidc.mjs';
 import {ProductionCutoverCoordinator} from './production-cutover.mjs';
 import {CUTOVER_AUTHORITY_REF,MINIMUM_SCOPE} from './production-role-interface.mjs';
 import {ProductionRoleGateway} from './google-role-gateway.mjs';
+import {RoleEnrollmentService} from './role-enrollment.mjs';
 
 const enabled=value=>value==='true';
 const config = Object.freeze({ release_id: process.env.CF2_RELEASE_ID, database_url: process.env.CF2_DATABASE_URL ?? process.env.DATABASE_URL, port: Number(process.env.PORT ?? 10000), production_cutover_enabled: enabled(process.env.CF2_PRODUCTION_WRITER_ENABLED), external_adapters_enabled: false, role_cutover_enabled: enabled(process.env.CF2_ROLE_CUTOVER_ENABLED), oidc:{repository:process.env.CF2_OIDC_REPOSITORY,repositoryId:process.env.CF2_OIDC_REPOSITORY_ID,workflowRef:process.env.CF2_OIDC_WORKFLOW_REF,ref:process.env.CF2_OIDC_REF,audience:CUTOVER_AUDIENCE} });
@@ -14,7 +15,9 @@ const databaseHost = new URL(config.database_url).hostname;
 const renderInternalDatabase = /^dpg-[a-z0-9]+-a$/.test(databaseHost);
 const store = new PostgresStore({ connectionString: config.database_url, ssl: { rejectUnauthorized: !renderInternalDatabase } });
 await store.migrate();
-const roleGateway=new ProductionRoleGateway(store,{clientId:process.env.CF2_GOOGLE_OAUTH_CLIENT_ID,clientSecret:process.env.CF2_GOOGLE_OAUTH_CLIENT_SECRET,baseUrl:process.env.RENDER_EXTERNAL_URL??'https://cf2-prod-core.onrender.com',bindings:process.env.CF2_GOOGLE_ROLE_BINDINGS});
+const roleBaseUrl=process.env.RENDER_EXTERNAL_URL??'https://cf2-prod-core.onrender.com';
+const roleEnrollments=new RoleEnrollmentService(store,{baseUrl:roleBaseUrl,signingSecret:process.env.CF2_GOOGLE_OAUTH_CLIENT_SECRET});
+const roleGateway=new ProductionRoleGateway(store,{clientId:process.env.CF2_GOOGLE_OAUTH_CLIENT_ID,clientSecret:process.env.CF2_GOOGLE_OAUTH_CLIENT_SECRET,baseUrl:roleBaseUrl,bindings:process.env.CF2_GOOGLE_ROLE_BINDINGS,enrollments:roleEnrollments});
 let authenticator=null;try{authenticator=new GitHubOidcAuthenticator(config.oidc);}catch{}
 const coordinator=new ProductionCutoverCoordinator(store,{productionEnabled:config.production_cutover_enabled,roleEnabled:config.role_cutover_enabled});
 const send=(response,status,value)=>response.writeHead(status,{'content-type':'application/json','cache-control':'no-store'}).end(JSON.stringify(value));
