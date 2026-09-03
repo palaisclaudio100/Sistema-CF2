@@ -35,8 +35,13 @@ jobs:
             with urllib.request.urlopen(req,timeout=60) as response:
               body=response.read();return json.loads(body) if body else None
           wrapped=call('GET',f'/services/{service_id}');service=wrapped.get('service',wrapped)
-          details=service.get('serviceDetails',{}); repo=service.get('repo','')
-          if service.get('id')!=service_id or service.get('name')!='cf2-prod-core' or service.get('type') not in ('web_service','web') or details.get('plan')!='starter' or service.get('autoDeploy') not in ('no',False) or 'palaisclaudio100/Sistema-CF2' not in repo:raise SystemExit('EXACT_SERVICE_IDENTITY_FAILED')
+          details=service.get('serviceDetails',{});repo=service.get('repo','');plan=details.get('plan',service.get('plan'))
+          if service.get('id')!=service_id:raise SystemExit('SERVICE_ID_MISMATCH')
+          if service.get('name')!='cf2-prod-core':raise SystemExit('SERVICE_NAME_MISMATCH')
+          if service.get('type') not in ('web_service','web'):raise SystemExit('SERVICE_TYPE_MISMATCH')
+          if plan!='starter':raise SystemExit('SERVICE_PLAN_MISMATCH')
+          if service.get('autoDeploy') not in ('no',False):raise SystemExit('SERVICE_AUTODEPLOY_MISMATCH')
+          if service.get('branch')!='master' or 'palaisclaudio100/Sistema-CF2' not in repo:raise SystemExit('SERVICE_SOURCE_MISMATCH')
           envs=call('GET',f'/services/{service_id}/env-vars'); envs=[x.get('envVar',x) for x in envs]; values={x.get('key'):x.get('value') for x in envs}
           database_url=values.get('CF2_DATABASE_URL') or values.get('DATABASE_URL');
           if not database_url:raise SystemExit('DATABASE_LINK_MISSING')
