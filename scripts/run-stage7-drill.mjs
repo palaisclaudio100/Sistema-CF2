@@ -1,9 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { runMinimumOperationalRehearsal, runStagingDrill } from '../src/cutover-tooling.mjs';
+import { runIntegratedStage7Gate } from '../src/cutover-tooling.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
 const output = path.join(root, 'dev', 'shadow', 'STAGE7_CUTOVER_DRILL.json');
-const report = { generic:runStagingDrill(), minimum_operational:runMinimumOperationalRehearsal() };
+const report = runIntegratedStage7Gate();
 fs.writeFileSync(output, `${JSON.stringify(report, null, 2)}\n`);
-console.log(JSON.stringify({ environment: report.generic.environment, equality: report.generic.equality.result, minimum_scope:report.minimum_operational.scope, journal_entries:report.generic.journal.length+report.minimum_operational.journal.length, production_cutover_disabled:report.generic.production_cutover_disabled, zero_production_side_effect:report.generic.zero_production_side_effect&&report.minimum_operational.no_side_effect }, null, 2));
+console.log(JSON.stringify({ environment:report.environment,scope:report.scope,single_writer:report.single_writer,equality_initial:report.equality_initial.result,equality_final:report.equality_final.result,decision_persisted:report.decision_persisted,journal_entries:report.journal.length,rollbacks:report.rollback,environment_transition:report.environment_transition,cf1_writes:report.cf1_writes,external_effects:report.external_effects,production_cutover_disabled:report.production_cutover_disabled }, null, 2));

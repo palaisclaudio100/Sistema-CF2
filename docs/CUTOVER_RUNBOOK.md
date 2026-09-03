@@ -14,6 +14,8 @@ El primer ensayo de capacidad cubre exclusivamente `TASK` y `VERIFICATION`:
 
 El ensayo no corta producción ni habilita CF2 como writer productivo. Claudio conserva autoridad y veto, pero no es relay del recorrido ensayado. Los dominios no incluidos continúan bajo CF1.
 
+El ensayo integrado también valida una transición `GABY_CW cloud → local → cloud` contra un único Core. La ausencia de capacidad local produce `BLOCKED_LOCAL_CAPABILITY` solamente para la tarea afectada; una tarea cloud independiente continúa. Drive remoto se resuelve por `platform + external_id` exactos y no existe dependencia de una unidad `G:`. Codex y Claude Code permanecen fuera del runtime operacional.
+
 ## Antes
 
 1. Confirmar el scope explícito (por ejemplo, `TASK` sin incluir `DECISION`).
