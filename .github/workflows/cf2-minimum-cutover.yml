@@ -40,8 +40,11 @@ jobs:
           if service.get('name')!='cf2-prod-core':raise SystemExit('SERVICE_NAME_MISMATCH')
           if service.get('type') not in ('web_service','web'):raise SystemExit('SERVICE_TYPE_MISMATCH')
           if plan!='0.5c-512mb':raise SystemExit(f'SERVICE_PLAN_MISMATCH:{plan!r}')
-          if service.get('autoDeploy') not in ('no',False):raise SystemExit('SERVICE_AUTODEPLOY_MISMATCH')
           if service.get('branch')!='master' or 'palaisclaudio100/Sistema-CF2' not in repo:raise SystemExit('SERVICE_SOURCE_MISMATCH')
+          if service.get('autoDeploy') not in ('no',False):
+            call('PATCH',f'/services/{service_id}',{'autoDeploy':'no'})
+            verified=call('GET',f'/services/{service_id}');verified=verified.get('service',verified)
+            if verified.get('id')!=service_id or verified.get('autoDeploy') not in ('no',False):raise SystemExit('SERVICE_AUTODEPLOY_DISABLE_FAILED')
           envs=call('GET',f'/services/{service_id}/env-vars'); envs=[x.get('envVar',x) for x in envs]; values={x.get('key'):x.get('value') for x in envs}
           database_url=values.get('CF2_DATABASE_URL') or values.get('DATABASE_URL');
           if not database_url:raise SystemExit('DATABASE_LINK_MISSING')
