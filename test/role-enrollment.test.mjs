@@ -60,3 +60,10 @@ test('expired enrollment is persisted as EXPIRED and cannot start OAuth',async()
   await assert.rejects(service.start(fragmentToken(pair[0].url)),/ENROLLMENT_EXPIRED/);
   assert.equal(pool.enrollments.get('ENROLLMENT:GABY_CHAT').status,'EXPIRED');
 });
+
+test('browser enrollment confirmation never returns bearer or refresh credentials',async()=>{
+  const pool=new MemoryPool(),service=new RoleEnrollmentService({pool},{baseUrl:'https://cf2-prod-core.onrender.com',signingSecret:'synthetic-secret-with-sufficient-entropy'}),pair=await service.createPair(),target=await service.start(fragmentToken(pair[0].url));
+  const result=await service.consume({...target,human_fingerprint:'c'.repeat(64),issueCredentials:false});
+  assert.deepEqual(result,{result:'ENROLLMENT_PASS',actor_id:'ACTOR:GABY_CHAT',allowed_roles:['GABY_CHAT']});
+  assert.equal(pool.sessions.size,0);assert.equal(Object.hasOwn(result,'access_token'),false);assert.equal(Object.hasOwn(result,'refresh_token'),false);
+});

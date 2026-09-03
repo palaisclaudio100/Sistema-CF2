@@ -54,7 +54,7 @@ export class RoleEnrollmentService{
     }catch(error){if(!['ENROLLMENT_INVALID','ENROLLMENT_EXPIRED','ENROLLMENT_CONSUMED'].includes(error.message))await client.query('ROLLBACK');throw error;}finally{client.release();}
   }
 
-  async consume({enrollment_id,actor_id,human_fingerprint}){
+  async consume({enrollment_id,actor_id,human_fingerprint,issueCredentials=true}){
     if(!ACTOR_ROLES[actor_id]||!/^[a-f0-9]{64}$/.test(human_fingerprint??''))throw new Error('ENROLLMENT_INVALID');
     const client=await this.pool.connect(),nowMs=this.clock(),session_id=`ROLE_SESSION:${crypto.randomUUID()}`,access_jti=crypto.randomUUID(),refresh_token=randomToken();
     try{
@@ -65,9 +65,9 @@ export class RoleEnrollmentService{
       if(row.status!=='PENDING')throw new Error(`ENROLLMENT_${row.status}`);
       const access_expires_at=new Date(nowMs+ACCESS_TTL_SECONDS*1000),refresh_expires_at=new Date(nowMs+REFRESH_TTL_SECONDS*1000);
       await client.query("UPDATE role_gateway_enrollments SET status='CONSUMED',human_fingerprint=$2,consumed_at=$3 WHERE enrollment_id=$1",[enrollment_id,human_fingerprint,new Date(nowMs)]);
-      await client.query('INSERT INTO role_gateway_sessions(session_id,enrollment_id,actor_id,access_jti_hash,refresh_token_hash,created_at,access_expires_at,refresh_expires_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',[session_id,enrollment_id,actor_id,digest(access_jti),digest(refresh_token),new Date(nowMs),access_expires_at,refresh_expires_at]);
-      await this.#audit(client,{enrollment_id,session_id,actor_id,operation:'CONSUMED',accepted:true,reason_code:'SESSION_ISSUED'});await client.query('COMMIT');
-      return this.#tokenResult({session_id,actor_id,access_jti,refresh_token,nowMs,refresh_expires_at});
+      if(issueCredentials)await client.query('INSERT INTO role_gateway_sessions(session_id,enrollment_id,actor_id,access_jti_hash,refresh_token_hash,created_at,access_expires_at,refresh_expires_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',[session_id,enrollment_id,actor_id,digest(access_jti),digest(refresh_token),new Date(nowMs),access_expires_at,refresh_expires_at]);
+      await this.#audit(client,{enrollment_id,session_id:issueCredentials?session_id:null,actor_id,operation:'CONSUMED',accepted:true,reason_code:issueCredentials?'SESSION_ISSUED':'MCP_AUTHORIZATION_REQUIRED'});await client.query('COMMIT');
+      return issueCredentials?this.#tokenResult({session_id,actor_id,access_jti,refresh_token,nowMs,refresh_expires_at}):{result:'ENROLLMENT_PASS',actor_id,allowed_roles:ACTOR_ROLES[actor_id]};
     }catch(error){if(!['ENROLLMENT_EXPIRED'].includes(error.message))await client.query('ROLLBACK');throw error;}finally{client.release();}
   }
 

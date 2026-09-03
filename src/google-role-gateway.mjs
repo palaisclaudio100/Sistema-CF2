@@ -15,6 +15,7 @@ const json=(response,status,value,headers={})=>response.writeHead(status,{'conte
 const html=(response,value)=>response.writeHead(200,{'content-type':'text/html; charset=utf-8','cache-control':'no-store','referrer-policy':'no-referrer','content-security-policy':"default-src 'none'; script-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"}).end(value);
 const cookie=request=>Object.fromEntries((request.headers.cookie??'').split(';').map(part=>part.trim()).filter(Boolean).map(part=>{const i=part.indexOf('=');return i<0?[part,'']:[part.slice(0,i),part.slice(i+1)];}));
 const safeEqual=(left,right)=>{const a=Buffer.from(left??''),b=Buffer.from(right??'');return a.length===b.length&&crypto.timingSafeEqual(a,b);};
+const enrollmentConfirmation=({actor_id,allowed_roles})=>`<!doctype html><meta charset="utf-8"><meta name="referrer" content="no-referrer"><title>CF2 Enrollment</title><h1>ENROLLMENT=PASS</h1><p>actor_id: ${actor_id}</p><p>allowed_roles: ${allowed_roles.join(', ')}</p>`;
 
 export function parseRoleBindings(raw){
   if(!raw)return new Map();
@@ -52,9 +53,10 @@ export class GoogleOpenIdClient{
 }
 
 export class ProductionRoleGateway{
-  constructor(store,{clientId,clientSecret,baseUrl,bindings,enrollments,fetchImpl,clock=()=>Date.now()}={}){
+  constructor(store,{clientId,clientSecret,baseUrl,bindings,enrollments,remoteMcp,fetchImpl,clock=()=>Date.now()}={}){
     this.store=store;this.clock=clock;this.states=new Map();this.sessions=new Map();this.authorizer=new RoleAuthorizer(parseRoleBindings(bindings));
     this.enrollments=enrollments;
+    this.remoteMcp=remoteMcp;
     this.oauth=new GoogleOpenIdClient({clientId,clientSecret,redirectUri:`${baseUrl}/oauth/google/callback`,fetchImpl,clock});
   }
   health(){return{oauth:this.oauth.configured()?'READY':'NOT_READY',enrollment:this.enrollments?'READY':'NOT_READY',binding_count:this.authorizer.bindings.size,scopes:OAUTH_SCOPES,redirect_uri:this.oauth.redirectUri};}
@@ -63,7 +65,7 @@ export class ProductionRoleGateway{
   async #audit({principal,acting_role,operation,authorized,reason_code,object_id=null}){await this.store.pool.query('INSERT INTO role_gateway_audit(event_id,actor_id,acting_role,operation,authorized,reason_code,object_id,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,now())',[`ROLE_GATE:${crypto.randomUUID()}`,principal?.actor_id??'UNAUTHENTICATED',acting_role??null,operation,authorized,reason_code,object_id]);}
   async #deny(response,status,reason,context={}){await this.#audit({...context,authorized:false,reason_code:reason});return json(response,status,{result:'FAIL_CLOSED',error_code:reason});}
   async handle(request,response,url,readBody){
-    if(!url.pathname.startsWith('/oauth/google/')&&!url.pathname.startsWith('/role/'))return false;
+    if(!url.pathname.startsWith('/oauth/google/')&&!url.pathname.startsWith('/role/')&&url.pathname!=='/oauth/mcp/authorize')return false;
     if(request.method==='GET'&&url.pathname==='/role/enroll')return html(response,enrollmentPage()),true;
     if(request.method==='POST'&&url.pathname==='/role/enroll/start'){
       let body;try{body=await readBody(request);if(!body||Array.isArray(body)||typeof body!=='object'||Object.keys(body).length!==1||typeof body.enrollment_token!=='string')throw new Error('ENROLLMENT_INVALID');}catch{return json(response,400,{result:'FAIL_CLOSED',error_code:'ENROLLMENT_INVALID'}),true;}
@@ -76,9 +78,13 @@ export class ProductionRoleGateway{
       if(!this.oauth.configured())return json(response,503,{result:'OAUTH_NOT_CONFIGURED'}),true;
       this.#prune();const state=crypto.randomBytes(32).toString('base64url'),verifier=crypto.randomBytes(48).toString('base64url'),challenge=crypto.createHash('sha256').update(verifier).digest('base64url'),nonce=crypto.randomBytes(32).toString('base64url');this.states.set(state,{verifier,nonce,expires:this.clock()+600_000});response.writeHead(302,{location:this.oauth.authorizationUrl({state,challenge,nonce}),'cache-control':'no-store'}).end();return true;
     }
+    if(request.method==='GET'&&url.pathname==='/oauth/mcp/authorize'){
+      if(!this.oauth.configured()||!this.remoteMcp)return json(response,503,{result:'OAUTH_NOT_CONFIGURED'}),true;
+      try{this.#prune();const mcp=await this.remoteMcp.authorizationRequest(url),state=crypto.randomBytes(32).toString('base64url'),verifier=crypto.randomBytes(48).toString('base64url'),challenge=crypto.createHash('sha256').update(verifier).digest('base64url'),nonce=crypto.randomBytes(32).toString('base64url');this.states.set(state,{verifier,nonce,mcp,expires:this.clock()+600_000});response.writeHead(302,{location:this.oauth.authorizationUrl({state,challenge,nonce}),'cache-control':'no-store'}).end();return true;}catch(error){return json(response,400,{result:'FAIL_CLOSED',error_code:error.message}),true;}
+    }
     if(request.method==='GET'&&url.pathname==='/oauth/google/callback'){
       const state=url.searchParams.get('state'),entry=this.states.get(state);this.states.delete(state);if(!entry||entry.expires<=this.clock()||!url.searchParams.get('code'))return json(response,400,{result:'FAIL_CLOSED',error_code:'OAUTH_STATE_INVALID'}),true;
-      try{const token=await this.oauth.exchange(url.searchParams.get('code'),entry.verifier),claims=await this.oauth.verify(token,entry.nonce),principal_fingerprint=fingerprint(claims.sub);if(claims.email_verified!==true)throw new Error('ID_TOKEN_INVALID');if(entry.enrollment)return json(response,200,{result:'OAUTH_PASS',...await this.enrollments.consume({...entry.enrollment,human_fingerprint:principal_fingerprint})}),true;const principal=this.authorizer.principal(claims);if(!principal)return json(response,403,{result:'UNBOUND_PRINCIPAL',principal_fingerprint}),true;const raw=crypto.randomBytes(48).toString('base64url'),csrf=crypto.randomBytes(32).toString('base64url');this.sessions.set(sessionHash(raw),{...principal,csrf,auth_kind:'cookie',expires:this.clock()+3_600_000,revoked:false});return json(response,200,{result:'OAUTH_PASS',actor_id:principal.actor_id,allowed_roles:principal.allowed_roles,csrf_token:csrf},{'set-cookie':`__Host-cf2_role_session=${raw}; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=3600`}),true;}catch(error){const code=['OAUTH_EXCHANGE_FAILED','ID_TOKEN_MISSING','ID_TOKEN_INVALID','JWKS_UNAVAILABLE','ENROLLMENT_INVALID','ENROLLMENT_EXPIRED','ENROLLMENT_CONSUMED','ENROLLMENT_ACTOR_MISMATCH'].includes(error?.message)?error.message:'OAUTH_FAILED';return json(response,401,{result:'FAIL_CLOSED',error_code:code}),true;}
+      try{const token=await this.oauth.exchange(url.searchParams.get('code'),entry.verifier),claims=await this.oauth.verify(token,entry.nonce),principal_fingerprint=fingerprint(claims.sub);if(claims.email_verified!==true)throw new Error('ID_TOKEN_INVALID');const directPrincipal=this.authorizer.principal(claims);if(entry.mcp){const actor_id=await this.remoteMcp.resolveActor({resource:entry.mcp.resource,human_fingerprint:principal_fingerprint,directPrincipal}),location=await this.remoteMcp.completeAuthorization({request:entry.mcp,actor_id});response.writeHead(302,{location,'cache-control':'no-store'}).end();return true;}if(entry.enrollment){const confirmation=await this.enrollments.consume({...entry.enrollment,human_fingerprint:principal_fingerprint,issueCredentials:false});return html(response,enrollmentConfirmation(confirmation)),true;}const principal=directPrincipal;if(!principal)return json(response,403,{result:'UNBOUND_PRINCIPAL',principal_fingerprint}),true;const raw=crypto.randomBytes(48).toString('base64url'),csrf=crypto.randomBytes(32).toString('base64url');this.sessions.set(sessionHash(raw),{...principal,csrf,auth_kind:'cookie',expires:this.clock()+3_600_000,revoked:false});return json(response,200,{result:'OAUTH_PASS',actor_id:principal.actor_id,allowed_roles:principal.allowed_roles,csrf_token:csrf},{'set-cookie':`__Host-cf2_role_session=${raw}; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=3600`}),true;}catch(error){const code=['OAUTH_EXCHANGE_FAILED','ID_TOKEN_MISSING','ID_TOKEN_INVALID','JWKS_UNAVAILABLE','ENROLLMENT_INVALID','ENROLLMENT_EXPIRED','ENROLLMENT_CONSUMED','ENROLLMENT_ACTOR_MISMATCH','MCP_RESOURCE_INVALID','MCP_PRINCIPAL_REJECTED'].includes(error?.message)?error.message:'OAUTH_FAILED';return json(response,401,{result:'FAIL_CLOSED',error_code:code}),true;}
     }
     const session=await this.#session(request);if(!session)return await this.#deny(response,401,'AUTHENTICATION_REQUIRED',{operation:url.pathname}),true;
     if(request.method==='GET'&&url.pathname==='/role/whoami')return json(response,200,{result:'PASS',actor_id:session.actor_id,allowed_roles:session.allowed_roles,...(session.auth_kind==='cookie'?{csrf_token:session.csrf}:{})}),true;

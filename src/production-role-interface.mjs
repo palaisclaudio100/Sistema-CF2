@@ -4,6 +4,11 @@ import {CUTOVER_PRINCIPAL} from './github-oidc.mjs';
 export const MINIMUM_SCOPE=Object.freeze(['TASK','VERIFICATION']);
 export const CUTOVER_AUTHORITY_REF='AUTHORITY:CLAUDIO_PALAIS:CF2_MINIMUM_CUTOVER:TASK_VERIFICATION';
 const allowed=new Set(['CREATE_TASK','TRANSITION_TASK','RECORD_VERIFICATION']);
+const operationalRoles=Object.freeze({
+  'ACTOR:DIEGO':Object.freeze(['DGA','PRODUCTOR_MUSICAL']),
+  'ACTOR:GABY_CHAT':Object.freeze(['GABY_CHAT']),
+  'ACTOR:GABY_CW':Object.freeze(['GABY_CW_AUDIOVISUAL','GABY_CW_DOCUMENTAL'])
+});
 
 export class ProductionRoleInterface{
   constructor(store,{productionEnabled=false,roleEnabled=false}={}){this.store=store;this.productionEnabled=productionEnabled;this.roleEnabled=roleEnabled;}
@@ -19,4 +24,18 @@ export class ProductionRoleInterface{
   }
   async status(command_id){return this.store.commandStatus(command_id);}
   async readTask(task_id){return this.store.getObject(task_id);}
+  async submitRoleCommand({principal,acting_role,command}){
+    if(!principal?.actor_id||!operationalRoles[principal.actor_id]?.includes(acting_role)||!principal.allowed_roles?.includes(acting_role))return{accepted:false,reason_code:'ROLE_FORBIDDEN'};
+    if(!command||command.actor_id||command.actor_role||command.acting_role||command.payload?.object?.actor_id||command.payload?.object?.actor_role)return{accepted:false,reason_code:'ACTOR_MISMATCH'};
+    if(!allowed.has(command.command_type))return{accepted:false,reason_code:'ROLE_FORBIDDEN'};
+    const object=command.payload?.object;
+    if(command.command_type==='RECORD_VERIFICATION'&&(!object||object.type!=='VERIFICATION'||!object.evidence_ref))return{accepted:false,reason_code:'EVIDENCE_REQUIRED'};
+    if(command.command_type==='CREATE_TASK'&&(!object||object.type!=='TASK'||(principal.actor_id!=='ACTOR:DIEGO'&&object.responsible_role!==acting_role)))return{accepted:false,reason_code:'ROLE_FORBIDDEN'};
+    if(command.command_type==='TRANSITION_TASK'&&principal.actor_id!=='ACTOR:DIEGO'){
+      const task=await this.store.getObject(command.payload?.task_id);if(!task||task.type!=='TASK'||task.responsible_role!==acting_role)return{accepted:false,reason_code:'ROLE_FORBIDDEN'};
+    }
+    for(const domain of [command.command_type==='RECORD_VERIFICATION'?'VERIFICATION':'TASK'])if(await this.store.writer(domain)!=='CF2_WRITER')return{accepted:false,reason_code:'WRITER_NOT_AUTHORIZED'};
+    const secured={...command,actor_id:principal.actor_id,actor_role:acting_role,issued_at:new Date().toISOString(),payload:{...command.payload,...(object?{object:{...object,...(command.command_type==='RECORD_VERIFICATION'?{verified_by:principal.actor_id}:{})}}:{})}};
+    const result=await this.store.submitCommand(secured);return{...result,command_id:secured.command_id,actor_id:principal.actor_id,acting_role};
+  }
 }

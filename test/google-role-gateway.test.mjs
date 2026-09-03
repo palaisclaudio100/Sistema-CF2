@@ -44,4 +44,6 @@ test('source contains no token logging and forbids client actor declarations',as
   assert.doesNotMatch(source,/console\./);
   assert.doesNotMatch(source,/JSON\.stringify\(tokens\)/);
   assert.doesNotMatch(source,/json\(response,\s*\d+,\s*tokens\)/);
+  assert.match(source,/issueCredentials:false/);
+  assert.match(source,/enrollmentConfirmation\(confirmation\)/);
 });
