@@ -21,6 +21,12 @@ services:
         value: "false"
       - key: CF2_ROLE_CUTOVER_ENABLED
         value: "false"
+      - key: CF2_GOOGLE_OAUTH_CLIENT_ID
+        sync: false
+      - key: CF2_GOOGLE_OAUTH_CLIENT_SECRET
+        sync: false
+      - key: CF2_GOOGLE_ROLE_BINDINGS
+        sync: false
       - key: CF2_OIDC_REPOSITORY
         value: palaisclaudio100/Sistema-CF2
       - key: CF2_OIDC_REPOSITORY_ID
