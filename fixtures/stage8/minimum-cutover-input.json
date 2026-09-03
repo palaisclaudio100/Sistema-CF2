@@ -1,0 +1,21 @@
+{
+  "kind": "CF1_FINAL_TASK_VERIFICATION_CURRENT",
+  "mode": "CF1_READ_ONLY",
+  "baseline_digest": "baff5dee6b039e2960831f4a8ed3368a23a8f682d28ac260148fc3bd910d1b9f",
+  "scope": ["TASK", "VERIFICATION"],
+  "critical_discrepancies": 0,
+  "objects": [
+    {
+      "id": "TASK:RECURRENT:DAILY_RESEARCH", "type": "TASK", "status": "OPEN", "state": "OPEN",
+      "created_at": "2026-09-01T19:27:48.449Z", "updated_at": "2026-09-01T19:27:48.449Z",
+      "basis_ref": ["CF1:MAESTRO:1pUpFiYaKukRZkv75B9pV1klR36jjprJ5#L457"],
+      "action": "CONDUCT_DAILY_RESEARCH", "responsible_role": "GABY_CHAT", "related_ids": [], "recurrence": "DAILY"
+    },
+    {
+      "id": "TASK:MIAMI_RESEARCH:20260927", "type": "TASK", "status": "OPEN", "state": "OPEN",
+      "created_at": "2026-09-01T19:27:48.449Z", "updated_at": "2026-09-01T19:27:48.449Z",
+      "basis_ref": ["CF1:MAESTRO:1pUpFiYaKukRZkv75B9pV1klR36jjprJ5#L4913"],
+      "action": "DELIVER_MIAMI_RESEARCH", "responsible_role": "GABY_CHAT", "related_ids": [], "due_at": "2026-09-27T00:00:00.000Z"
+    }
+  ]
+}

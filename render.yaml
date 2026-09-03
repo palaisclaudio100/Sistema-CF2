@@ -21,6 +21,14 @@ services:
         value: "false"
       - key: CF2_ROLE_CUTOVER_ENABLED
         value: "false"
+      - key: CF2_OIDC_REPOSITORY
+        value: palaisclaudio100/Sistema-CF2
+      - key: CF2_OIDC_REPOSITORY_ID
+        value: "1351688098"
+      - key: CF2_OIDC_WORKFLOW_REF
+        value: palaisclaudio100/Sistema-CF2/.github/workflows/cf2-minimum-cutover.yml@refs/heads/master
+      - key: CF2_OIDC_REF
+        value: refs/heads/master
 databases:
   - name: cf2-prod-postgres
     plan: basic-256mb

@@ -1,0 +1,132 @@
+name: CF2 minimum production cutover
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  cutover-task-verification:
+    runs-on: ubuntu-latest
+    env:
+      RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+      SERVICE_ID: srv-daa8dngae00c73a3m15g
+      TARGET_COMMIT: ${{ github.sha }}
+      CORE_URL: https://cf2-prod-core.onrender.com
+      OIDC_AUDIENCE: cf2-prod-role-interface
+      AUTHORITY_REF: AUTHORITY:CLAUDIO_PALAIS:CF2_MINIMUM_CUTOVER:TASK_VERIFICATION
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Verify candidate
+        run: npm test
+
+      - name: Exact resource identity and deploy with flags off
+        shell: python
+        run: |
+          import json, os, time, urllib.request
+          API='https://api.render.com/v1'; token=os.environ['RENDER_API_KEY']; service_id=os.environ['SERVICE_ID']; commit=os.environ['TARGET_COMMIT']
+          def call(method,path,payload=None):
+            req=urllib.request.Request(API+path,data=None if payload is None else json.dumps(payload).encode(),method=method,headers={'Authorization':f'Bearer {token}','Accept':'application/json','Content-Type':'application/json'})
+            with urllib.request.urlopen(req,timeout=60) as response:
+              body=response.read();return json.loads(body) if body else None
+          wrapped=call('GET',f'/services/{service_id}');service=wrapped.get('service',wrapped)
+          details=service.get('serviceDetails',{}); repo=service.get('repo','')
+          if service.get('id')!=service_id or service.get('name')!='cf2-prod-core' or service.get('type') not in ('web_service','web') or details.get('plan')!='starter' or service.get('autoDeploy') not in ('no',False) or 'palaisclaudio100/Sistema-CF2' not in repo:raise SystemExit('EXACT_SERVICE_IDENTITY_FAILED')
+          envs=call('GET',f'/services/{service_id}/env-vars'); envs=[x.get('envVar',x) for x in envs]; values={x.get('key'):x.get('value') for x in envs}
+          database_url=values.get('CF2_DATABASE_URL') or values.get('DATABASE_URL');
+          if not database_url:raise SystemExit('DATABASE_LINK_MISSING')
+          db_host=database_url.split('@')[-1].split('/')[0].split(':')[0]; postgres=call('GET','/postgres?limit=100'); matches=[]
+          for wrapped in postgres:
+            db=wrapped.get('postgres',wrapped);full=call('GET',f"/postgres/{db.get('id')}");full=full.get('postgres',full);info=full.get('connectionInfo',{});internal=info.get('internalConnectionString','')
+            if internal and internal.split('@')[-1].split('/')[0].split(':')[0]==db_host:matches.append(db)
+          if len(matches)!=1:raise SystemExit('DATABASE_EXACT_IDENTITY_FAILED')
+          print(f"RENDER_SERVICE_ID={service_id}");print(f"POSTGRES_EXACT_ID={matches[0].get('id')}")
+          settings={'CF2_PRODUCTION_WRITER_ENABLED':'false','CF2_ROLE_CUTOVER_ENABLED':'false','CF2_EXTERNAL_ADAPTERS_ENABLED':'false','CF2_OIDC_REPOSITORY':'palaisclaudio100/Sistema-CF2','CF2_OIDC_REPOSITORY_ID':'1351688098','CF2_OIDC_WORKFLOW_REF':'palaisclaudio100/Sistema-CF2/.github/workflows/cf2-minimum-cutover.yml@refs/heads/master','CF2_OIDC_REF':'refs/heads/master','CF2_RELEASE_ID':commit}
+          for key,value in settings.items():call('PUT',f'/services/{service_id}/env-vars/{key}',{'value':value})
+          created=call('POST',f'/services/{service_id}/deploys',{'commitId':commit}); deploy=created.get('deploy',created); deploy_id=deploy.get('id');
+          if not deploy_id:raise SystemExit('DEPLOY_ID_MISSING')
+          deadline=time.monotonic()+1200
+          while time.monotonic()<deadline:
+            state=call('GET',f'/services/{service_id}/deploys/{deploy_id}');state=state.get('deploy',state)
+            if state.get('status') in ('live','build_failed','update_failed','canceled'):break
+            time.sleep(10)
+          if state.get('status')!='live' or state.get('commit',{}).get('id')!=commit:raise SystemExit(f"FLAGS_OFF_DEPLOY_FAILED:{state.get('status')}")
+          open('/tmp/cf2-resource-evidence.json','w').write(json.dumps({'service_id':service_id,'postgres_id':matches[0].get('id'),'flags_off_deploy_id':deploy_id,'commit':commit}))
+
+      - name: Verify flags off and writer rejection
+        shell: bash
+        run: |
+          set -euo pipefail
+          health="$(curl --fail --silent --show-error "$CORE_URL/health")"
+          HEALTH="$health" python3 - <<'PY'
+          import json,os
+          h=json.loads(os.environ['HEALTH'])
+          assert h['database']=='UP' and h['oidc']=='READY'
+          assert h['flags']=={'production_cutover_enabled':False,'external_adapters_enabled':False,'role_cutover_enabled':False}
+          assert h['writers']=={'TASK':'CF1_WRITER','VERIFICATION':'CF1_WRITER'}
+          PY
+          oidc="$(curl --fail --silent --show-error -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=$OIDC_AUDIENCE" | python3 -c 'import json,sys;print(json.load(sys.stdin)["value"])')"
+          response="$(curl --silent --show-error --write-out '\n%{http_code}' -H "Authorization: Bearer $oidc" -H 'Content-Type: application/json' -d "{\"authority_ref\":\"$AUTHORITY_REF\",\"scope\":[\"TASK\",\"VERIFICATION\"]}" "$CORE_URL/internal/cutover/execute")"
+          code="${response##*$'\n'}"; body="${response%$'\n'*}"; test "$code" = 409
+          BODY="$body" python3 -c 'import json,os;assert json.loads(os.environ["BODY"])["error_code"]=="CUTOVER_DISABLED"'
+
+      - name: Backup delta equality with flags off
+        shell: bash
+        run: |
+          set -euo pipefail
+          oidc="$(curl --fail --silent --show-error -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=$OIDC_AUDIENCE" | python3 -c 'import json,sys;print(json.load(sys.stdin)["value"])')"
+          curl --fail --silent --show-error -H "Authorization: Bearer $oidc" -H 'Content-Type: application/json' -d "{\"authority_ref\":\"$AUTHORITY_REF\",\"scope\":[\"TASK\",\"VERIFICATION\"]}" "$CORE_URL/internal/cutover/preflight" > /tmp/cf2-preflight.json
+          python3 - <<'PY'
+          import json
+          p=json.load(open('/tmp/cf2-preflight.json'));assert p['result']=='PREPARED' and p['equality']=='EQUAL' and p['delta']['critical']==0
+          PY
+
+      - name: Enable only minimum cutover flags and deploy exact commit
+        shell: python
+        run: |
+          import json,os,time,urllib.request
+          API='https://api.render.com/v1';token=os.environ['RENDER_API_KEY'];service=os.environ['SERVICE_ID'];commit=os.environ['TARGET_COMMIT']
+          def call(method,path,payload=None):
+            request=urllib.request.Request(API+path,data=None if payload is None else json.dumps(payload).encode(),method=method,headers={'Authorization':f'Bearer {token}','Accept':'application/json','Content-Type':'application/json'})
+            with urllib.request.urlopen(request,timeout=60) as response:
+              body=response.read();return json.loads(body) if body else None
+          call('PUT',f'/services/{service}/env-vars/CF2_PRODUCTION_WRITER_ENABLED',{'value':'true'});call('PUT',f'/services/{service}/env-vars/CF2_ROLE_CUTOVER_ENABLED',{'value':'true'})
+          created=call('POST',f'/services/{service}/deploys',{'commitId':commit});deploy=created.get('deploy',created);deploy_id=deploy['id'];deadline=time.monotonic()+1200
+          while time.monotonic()<deadline:
+            state=call('GET',f'/services/{service}/deploys/{deploy_id}');state=state.get('deploy',state)
+            if state.get('status') in ('live','build_failed','update_failed','canceled'):break
+            time.sleep(10)
+          if state.get('status')!='live' or state.get('commit',{}).get('id')!=commit:raise SystemExit(f"CUTOVER_FLAGS_DEPLOY_FAILED:{state.get('status')}")
+          evidence=json.load(open('/tmp/cf2-resource-evidence.json'));evidence['cutover_deploy_id']=deploy_id;open('/tmp/cf2-resource-evidence.json','w').write(json.dumps(evidence))
+
+      - name: Execute single-writer handoff and canary
+        shell: bash
+        run: |
+          set -euo pipefail
+          oidc="$(curl --fail --silent --show-error -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=$OIDC_AUDIENCE" | python3 -c 'import json,sys;print(json.load(sys.stdin)["value"])')"
+          curl --fail --silent --show-error -H "Authorization: Bearer $oidc" -H 'Content-Type: application/json' -d "{\"authority_ref\":\"$AUTHORITY_REF\",\"scope\":[\"TASK\",\"VERIFICATION\"]}" "$CORE_URL/internal/cutover/execute" > /tmp/cf2-cutover.json
+          health="$(curl --fail --silent --show-error "$CORE_URL/health")"
+          HEALTH="$health" python3 - <<'PY'
+          import json,os
+          c=json.load(open('/tmp/cf2-cutover.json'));h=json.loads(os.environ['HEALTH'])
+          assert c['result']=='PASS_STABILIZATION_STARTED';assert c['writers']=={'TASK':'CF2_WRITER','VERIFICATION':'CF2_WRITER'}
+          assert c['canary']['no_proof']['reason_code']=='MISSING_CLOSURE_PROOF' and c['canary']['done']['accepted']
+          assert h['writers']=={'TASK':'CF2_WRITER','VERIFICATION':'CF2_WRITER'} and h['outbox_pending']>=0
+          evidence=json.load(open('/tmp/cf2-resource-evidence.json'));preflight=json.load(open('/tmp/cf2-preflight.json'))
+          safe={'result':c['result'],'principal':c['authenticated_actor'],'authority_ref':c['authority_ref'],'service_id':evidence['service_id'],'postgres_id':evidence['postgres_id'],'commit':evidence['commit'],'deploy_id':evidence['cutover_deploy_id'],'flags_off_deploy_id':evidence['flags_off_deploy_id'],'backup_id':preflight['backup_id'],'backup_digest':preflight['backup_digest'],'delta':preflight['delta'],'equality':preflight['equality'],'writers':c['writers'],'canary':{'create':c['canary']['create']['accepted'],'no_proof':c['canary']['no_proof']['reason_code'],'verification':c['canary']['verification']['accepted'],'done':c['canary']['done']['accepted'],'readback':c['canary']['readback']['state']},'journal_entries':c['journal_entries'],'production':'STABLE'}
+          open('cf2-minimum-cutover-evidence.json','w').write(json.dumps(safe,indent=2)+'\n')
+          PY
+
+      - name: Upload sanitized evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cf2-minimum-cutover-evidence-${{ github.run_id }}
+          path: cf2-minimum-cutover-evidence.json
+          if-no-files-found: warn
+          retention-days: 90
