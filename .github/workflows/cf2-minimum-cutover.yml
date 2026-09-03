@@ -69,14 +69,21 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          health="$(curl --fail --silent --show-error "$CORE_URL/health")"
-          HEALTH="$health" python3 - <<'PY'
+          ready=false
+          for attempt in $(seq 1 60); do
+            health="$(curl --fail --silent --show-error "$CORE_URL/health" || true)"
+            if HEALTH="$health" TARGET_COMMIT="$TARGET_COMMIT" python3 - <<'PY'
           import json,os
           h=json.loads(os.environ['HEALTH'])
+          assert h['release_id']==os.environ['TARGET_COMMIT']
           assert h['database']=='UP' and h['oidc']=='READY'
           assert h['flags']=={'production_cutover_enabled':False,'external_adapters_enabled':False,'role_cutover_enabled':False}
           assert h['writers']=={'TASK':'CF1_WRITER','VERIFICATION':'CF1_WRITER'}
           PY
+            then ready=true; break; fi
+            sleep 5
+          done
+          test "$ready" = true
           oidc="$(curl --fail --silent --show-error -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=$OIDC_AUDIENCE" | python3 -c 'import json,sys;print(json.load(sys.stdin)["value"])')"
           response="$(curl --silent --show-error --write-out '\n%{http_code}' -H "Authorization: Bearer $oidc" -H 'Content-Type: application/json' -d "{\"authority_ref\":\"$AUTHORITY_REF\",\"scope\":[\"TASK\",\"VERIFICATION\"]}" "$CORE_URL/internal/cutover/execute")"
           code="${response##*$'\n'}"; body="${response%$'\n'*}"; test "$code" = 409
