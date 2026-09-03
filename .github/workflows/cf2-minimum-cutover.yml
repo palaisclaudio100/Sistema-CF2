@@ -13,6 +13,7 @@ jobs:
     env:
       RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
       SERVICE_ID: srv-daa8dngae00c73a3m15g
+      POSTGRES_ID: dpg-daa8fc67bikc73fn9c60-a
       TARGET_COMMIT: ${{ github.sha }}
       CORE_URL: https://cf2-prod-core.onrender.com
       OIDC_AUDIENCE: cf2-prod-role-interface
@@ -29,7 +30,7 @@ jobs:
         shell: python
         run: |
           import json, os, time, urllib.request
-          API='https://api.render.com/v1'; token=os.environ['RENDER_API_KEY']; service_id=os.environ['SERVICE_ID']; commit=os.environ['TARGET_COMMIT']
+          API='https://api.render.com/v1'; token=os.environ['RENDER_API_KEY']; service_id=os.environ['SERVICE_ID']; postgres_id=os.environ['POSTGRES_ID']; commit=os.environ['TARGET_COMMIT']
           def call(method,path,payload=None):
             req=urllib.request.Request(API+path,data=None if payload is None else json.dumps(payload).encode(),method=method,headers={'Authorization':f'Bearer {token}','Accept':'application/json','Content-Type':'application/json'})
             with urllib.request.urlopen(req,timeout=60) as response:
@@ -48,12 +49,10 @@ jobs:
           envs=call('GET',f'/services/{service_id}/env-vars'); envs=[x.get('envVar',x) for x in envs]; values={x.get('key'):x.get('value') for x in envs}
           database_url=values.get('CF2_DATABASE_URL') or values.get('DATABASE_URL');
           if not database_url:raise SystemExit('DATABASE_LINK_MISSING')
-          db_host=database_url.split('@')[-1].split('/')[0].split(':')[0]; postgres=call('GET','/postgres?limit=100'); matches=[]
-          for wrapped in postgres:
-            db=wrapped.get('postgres',wrapped);full=call('GET',f"/postgres/{db.get('id')}");full=full.get('postgres',full);info=full.get('connectionInfo',{});internal=info.get('internalConnectionString','')
-            if internal and internal.split('@')[-1].split('/')[0].split(':')[0]==db_host:matches.append(db)
-          if len(matches)!=1:raise SystemExit('DATABASE_EXACT_IDENTITY_FAILED')
-          print(f"RENDER_SERVICE_ID={service_id}");print(f"POSTGRES_EXACT_ID={matches[0].get('id')}")
+          db_host=database_url.split('@')[-1].split('/')[0].split(':')[0]
+          wrapped_db=call('GET',f'/postgres/{postgres_id}');db=wrapped_db.get('postgres',wrapped_db)
+          if db.get('id')!=postgres_id or db.get('name')!='cf2-prod-postgres' or db_host!=postgres_id:raise SystemExit('DATABASE_EXACT_IDENTITY_FAILED')
+          print(f"RENDER_SERVICE_ID={service_id}");print(f"POSTGRES_EXACT_ID={postgres_id}")
           settings={'CF2_PRODUCTION_WRITER_ENABLED':'false','CF2_ROLE_CUTOVER_ENABLED':'false','CF2_EXTERNAL_ADAPTERS_ENABLED':'false','CF2_OIDC_REPOSITORY':'palaisclaudio100/Sistema-CF2','CF2_OIDC_REPOSITORY_ID':'1351688098','CF2_OIDC_WORKFLOW_REF':'palaisclaudio100/Sistema-CF2/.github/workflows/cf2-minimum-cutover.yml@refs/heads/master','CF2_OIDC_REF':'refs/heads/master','CF2_RELEASE_ID':commit}
           for key,value in settings.items():call('PUT',f'/services/{service_id}/env-vars/{key}',{'value':value})
           created=call('POST',f'/services/{service_id}/deploys',{'commitId':commit}); deploy=created.get('deploy',created); deploy_id=deploy.get('id');
@@ -64,7 +63,7 @@ jobs:
             if state.get('status') in ('live','build_failed','update_failed','canceled'):break
             time.sleep(10)
           if state.get('status')!='live' or state.get('commit',{}).get('id')!=commit:raise SystemExit(f"FLAGS_OFF_DEPLOY_FAILED:{state.get('status')}")
-          open('/tmp/cf2-resource-evidence.json','w').write(json.dumps({'service_id':service_id,'postgres_id':matches[0].get('id'),'flags_off_deploy_id':deploy_id,'commit':commit}))
+          open('/tmp/cf2-resource-evidence.json','w').write(json.dumps({'service_id':service_id,'postgres_id':postgres_id,'flags_off_deploy_id':deploy_id,'commit':commit}))
 
       - name: Verify flags off and writer rejection
         shell: bash
