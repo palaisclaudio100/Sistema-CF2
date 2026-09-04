@@ -7,14 +7,16 @@ export const MCP_ACTOR_ROLES=Object.freeze({
   'ACTOR:DIEGO':Object.freeze(['DGA','PRODUCTOR_MUSICAL']),
   'ACTOR:GABY_CHAT':Object.freeze(['GABY_CHAT']),
   'ACTOR:GABY_CW':Object.freeze(['GABY_CW_AUDIOVISUAL','GABY_CW_DOCUMENTAL']),
-  'ACTOR:CODEX':Object.freeze(['CODEX'])
+  'ACTOR:CODEX':Object.freeze(['CODEX']),
+  'ACTOR:CLAUDE_CODE':Object.freeze(['CLAUDE_CODE'])
 });
 
 const RESOURCE_ACTORS=Object.freeze({
   '/mcp/diego':'ACTOR:DIEGO',
   '/mcp/gaby-chat':'ACTOR:GABY_CHAT',
   '/mcp/gaby-cw':'ACTOR:GABY_CW',
-  '/mcp/codex':'ACTOR:CODEX'
+  '/mcp/codex':'ACTOR:CODEX',
+  '/mcp/claude-code':'ACTOR:CLAUDE_CODE'
 });
 const ACCESS_TTL_MS=3_600_000,REFRESH_TTL_MS=2_592_000_000,CODE_TTL_MS=300_000;
 const digest=value=>crypto.createHash('sha256').update(value).digest('hex');
@@ -38,7 +40,7 @@ export function mcpToolsFor(principal){
     Object.freeze({name:'get_my_tasks',description:'Read tasks visible to the authenticated CF2 principal.',inputSchema:{type:'object',properties:{limit:{type:'integer',minimum:1,maximum:100}},additionalProperties:false}}),
     Object.freeze({name:'get_task',description:'Read one task by its stable CF2 ID.',inputSchema:{type:'object',properties:{task_id:{type:'string',minLength:1,maxLength:200}},required:['task_id'],additionalProperties:false}}),
     Object.freeze({name:'submit_task_command',description:'Submit a TASK command through the server-side CF2 RoleInterface. actor_id, actor_role, and issued_at are bound server-side.',inputSchema:schemas.submit_task_command}),
-    ...(principal?.actor_id==='ACTOR:CODEX'?[]:[Object.freeze({name:'submit_verification',description:'Submit a VERIFICATION through the server-side CF2 RoleInterface. actor_id, actor_role, issued_at, and verified_by are bound server-side.',inputSchema:schemas.submit_verification})]),
+    ...(['ACTOR:CODEX','ACTOR:CLAUDE_CODE'].includes(principal?.actor_id)?[]:[Object.freeze({name:'submit_verification',description:'Submit a VERIFICATION through the server-side CF2 RoleInterface. actor_id, actor_role, issued_at, and verified_by are bound server-side.',inputSchema:schemas.submit_verification})]),
     Object.freeze({name:'get_status',description:'Read the status of a submitted CF2 command.',inputSchema:{type:'object',properties:{command_id:{type:'string',minLength:1,maxLength:200}},required:['command_id'],additionalProperties:false}})
   ];
   return Object.freeze(tools);

@@ -1,0 +1,71 @@
+name: CF2 Claude Code actor production deploy
+
+on:
+  push:
+    branches:
+      - cf2-claude-code-actor
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-claude-code-actor:
+    if: contains(github.event.head_commit.message, '[deploy claude code actor]')
+    runs-on: ubuntu-latest
+    env:
+      RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+      SERVICE_ID: srv-daa8dngae00c73a3m15g
+      TARGET_COMMIT: ${{ github.sha }}
+      CORE_URL: https://cf2-prod-core.onrender.com
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Verify candidate
+        run: npm run check
+
+      - name: Verify exact service and deploy exact commit once
+        shell: python
+        run: |
+          import json, os, time, urllib.request
+          api='https://api.render.com/v1'; token=os.environ['RENDER_API_KEY']; service_id=os.environ['SERVICE_ID']; commit=os.environ['TARGET_COMMIT']
+          def call(method,path,payload=None):
+            request=urllib.request.Request(api+path,data=None if payload is None else json.dumps(payload).encode(),method=method,headers={'Authorization':f'Bearer {token}','Accept':'application/json','Content-Type':'application/json'})
+            with urllib.request.urlopen(request,timeout=60) as response:
+              body=response.read();return json.loads(body) if body else None
+          wrapped=call('GET',f'/services/{service_id}');service=wrapped.get('service',wrapped)
+          if service.get('id')!=service_id:raise SystemExit('SERVICE_ID_MISMATCH')
+          if service.get('name')!='cf2-prod-core':raise SystemExit('SERVICE_NAME_MISMATCH')
+          if service.get('type') not in ('web_service','web'):raise SystemExit('SERVICE_TYPE_MISMATCH')
+          if service.get('branch')!='master' or 'palaisclaudio100/Sistema-CF2' not in service.get('repo',''):raise SystemExit('SERVICE_SOURCE_MISMATCH')
+          if service.get('autoDeploy') not in ('no',False):raise SystemExit('AUTODEPLOY_NOT_OFF')
+          created=call('POST',f'/services/{service_id}/deploys',{'commitId':commit});deploy=created.get('deploy',created);deploy_id=deploy.get('id')
+          if not deploy_id:raise SystemExit('DEPLOY_ID_MISSING')
+          deadline=time.monotonic()+1200
+          while time.monotonic()<deadline:
+            state=call('GET',f'/services/{service_id}/deploys/{deploy_id}');state=state.get('deploy',state)
+            if state.get('status') in ('live','build_failed','update_failed','canceled'):break
+            time.sleep(10)
+          if state.get('status')!='live' or state.get('commit',{}).get('id')!=commit:raise SystemExit(f"DEPLOY_FAILED:{state.get('status')}")
+          print(f'DEPLOY_ID={deploy_id}');print(f'COMMIT={commit}');print('SERVICE_IDENTITY=PASS')
+
+      - name: Verify health and Claude Code resource
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 60); do
+            health="$(curl --fail --silent --show-error "$CORE_URL/health" || true)"
+            metadata="$(curl --fail --silent --show-error "$CORE_URL/.well-known/oauth-protected-resource/mcp/claude-code" || true)"
+            if HEALTH="$health" METADATA="$metadata" python3 - <<'PY'
+          import json,os
+          h=json.loads(os.environ['HEALTH']);m=json.loads(os.environ['METADATA'])
+          assert h['database']=='UP'
+          assert h['writers']=={'TASK':'CF2_WRITER','VERIFICATION':'CF2_WRITER'}
+          assert h['flags']['external_adapters_enabled'] is False
+          assert m['resource']=='https://cf2-prod-core.onrender.com/mcp/claude-code'
+          PY
+            then exit 0; fi
+            sleep 5
+          done
+          exit 1

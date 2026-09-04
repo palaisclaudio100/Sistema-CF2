@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {RoleEnrollmentService,ENROLLMENT_SPECS,CODEX_ENROLLMENT_SPEC,ENROLLMENT_TTL_SECONDS,enrollmentPage} from '../src/role-enrollment.mjs';
+import {RoleEnrollmentService,ENROLLMENT_SPECS,CODEX_ENROLLMENT_SPEC,CLAUDE_CODE_ENROLLMENT_SPEC,ENROLLMENT_TTL_SECONDS,enrollmentPage} from '../src/role-enrollment.mjs';
 import {RoleAuthorizer} from '../src/google-role-gateway.mjs';
 
 class MemoryPool{
@@ -74,4 +74,11 @@ test('Codex enrollment is independent from the existing Gaby pair',async()=>{
   assert.deepEqual(pair.map(item=>item.enrollment_id),ENROLLMENT_SPECS.map(item=>item.enrollment_id));
   assert.equal(pair.length,2);assert.equal(codex.enrollment_id,CODEX_ENROLLMENT_SPEC.enrollment_id);assert.equal(codex.actor_id,'ACTOR:CODEX');
   assert.equal(pool.enrollments.get('ENROLLMENT:CODEX').actor_id,'ACTOR:CODEX');
+});
+
+test('Claude Code enrollment is independent from Codex and the Gaby pair',async()=>{
+  const pool=new MemoryPool(),service=new RoleEnrollmentService({pool},{baseUrl:'https://cf2-prod-core.onrender.com',signingSecret:'synthetic-secret-with-sufficient-entropy'});
+  await service.createPair();const codex=await service.createCodexEnrollment(),claude=await service.createClaudeCodeEnrollment();
+  assert.equal(codex.actor_id,'ACTOR:CODEX');assert.equal(claude.enrollment_id,CLAUDE_CODE_ENROLLMENT_SPEC.enrollment_id);assert.equal(claude.actor_id,'ACTOR:CLAUDE_CODE');
+  assert.notEqual(fragmentToken(codex.url),fragmentToken(claude.url));assert.equal(pool.enrollments.get('ENROLLMENT:CLAUDE_CODE').actor_id,'ACTOR:CLAUDE_CODE');
 });

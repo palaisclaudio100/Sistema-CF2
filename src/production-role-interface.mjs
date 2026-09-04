@@ -9,7 +9,8 @@ const operationalRoles=Object.freeze({
   'ACTOR:DIEGO':Object.freeze(['DGA','PRODUCTOR_MUSICAL']),
   'ACTOR:GABY_CHAT':Object.freeze(['GABY_CHAT']),
   'ACTOR:GABY_CW':Object.freeze(['GABY_CW_AUDIOVISUAL','GABY_CW_DOCUMENTAL']),
-  'ACTOR:CODEX':Object.freeze(['CODEX'])
+  'ACTOR:CODEX':Object.freeze(['CODEX']),
+  'ACTOR:CLAUDE_CODE':Object.freeze(['CLAUDE_CODE'])
 });
 
 export class ProductionRoleInterface{
@@ -30,7 +31,7 @@ export class ProductionRoleInterface{
     if(!principal?.actor_id||!operationalRoles[principal.actor_id]?.includes(acting_role)||!principal.allowed_roles?.includes(acting_role))return{accepted:false,reason_code:'ROLE_FORBIDDEN'};
     if(!command||command.actor_id||command.actor_role||command.acting_role||command.payload?.object?.actor_id||command.payload?.object?.actor_role)return{accepted:false,reason_code:'ACTOR_MISMATCH'};
     if(!allowed.has(command.command_type))return{accepted:false,reason_code:'ROLE_FORBIDDEN'};
-    if(acting_role==='CODEX'&&command.command_type==='RECORD_VERIFICATION')return{accepted:false,reason_code:'ROLE_FORBIDDEN'};
+    if(['CODEX','CLAUDE_CODE'].includes(acting_role)&&command.command_type==='RECORD_VERIFICATION')return{accepted:false,reason_code:'ROLE_FORBIDDEN'};
     const tool=command.command_type==='RECORD_VERIFICATION'?'submit_verification':'submit_task_command';
     if(!validateWriterToolArgs(tool,{acting_role,command},principal.allowed_roles))return{accepted:false,reason_code:'INVALID_SCHEMA'};
     if(!canaryIsolationValid(command))return{accepted:false,reason_code:'CANARY_NAMESPACE_VIOLATION'};

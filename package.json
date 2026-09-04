@@ -11,6 +11,7 @@
     "check": "node scripts/lint.mjs && node scripts/validate-contracts.mjs && node --test",
     "migrate:prod": "node scripts/migrate-prod.mjs",
     "enroll:codex": "node scripts/create-codex-enrollment.mjs",
+    "enroll:claude-code": "node scripts/create-claude-code-enrollment.mjs",
     "verify:prod-health": "node scripts/verify-prod-health.mjs",
     "start:prod": "node src/prod-service.mjs"
   },
