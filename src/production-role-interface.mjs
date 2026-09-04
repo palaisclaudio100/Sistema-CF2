@@ -37,10 +37,12 @@ export class ProductionRoleInterface{
     if(!canaryIsolationValid(command))return{accepted:false,reason_code:'CANARY_NAMESPACE_VIOLATION'};
     const object=command.payload?.object;
     const secured={...command,actor_id:principal.actor_id,actor_role:acting_role,issued_at:new Date().toISOString(),payload:{...command.payload,...(object?{object:{...object,...(command.command_type==='RECORD_VERIFICATION'?{verified_by:principal.actor_id}:{})}}:{})}};
-    const replay=await this.store.replayCommand?.(secured);if(replay)return{...replay,command_id:secured.command_id,actor_id:principal.actor_id,acting_role};
     if(command.command_type==='CREATE_TASK'){
       const diegoAssignsClaudeCode=principal.actor_id==='ACTOR:DIEGO'&&acting_role==='DGA'&&object.responsible_role==='CLAUDE_CODE';
       if(object.responsible_role!==acting_role&&!diegoAssignsClaudeCode)return{accepted:false,reason_code:'ROLE_FORBIDDEN'};
+    }
+    const replay=await this.store.replayCommand?.(secured);if(replay)return{...replay,command_id:secured.command_id,actor_id:principal.actor_id,acting_role};
+    if(command.command_type==='CREATE_TASK'){
       if(await this.store.getObject(object.id))return{accepted:false,reason_code:'OBJECT_ALREADY_EXISTS'};
       if(object.state==='DONE'&&!(await this.store.hasProof(object.closure_ref)))return{accepted:false,reason_code:'MISSING_CLOSURE_PROOF'};
     }

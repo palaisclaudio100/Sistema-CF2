@@ -15,7 +15,7 @@ const principals=Object.freeze({
 
 const task=(id,responsible_role)=>({id,type:'TASK',status:'CANCELLED',created_at:stamp,updated_at:stamp,basis_ref:['ACL:CLAUDE_CODE:ASSIGNMENT'],action:'VERIFY_CLAUDE_CODE_ASSIGNMENT_ACL',state:'CANCELLED',responsible_role,related_ids:[],non_productive:true});
 const command=(id,responsible_role)=>({command_id:`COMMAND:${id}`,command_type:'CREATE_TASK',idempotency_key:`IDEMPOTENCY:${id}`,payload:{object:task(`TASK:${id}`,responsible_role)}});
-const store=()=>{const submitted=[];return{submitted,writer:async()=> 'CF2_WRITER',getObject:async()=>null,hasProof:async()=>false,replayCommand:async()=>null,submitCommand:async value=>(submitted.push(value),{accepted:true,resulting_state_version:1})};};
+const store=(replay=null)=>{const submitted=[];let replayChecks=0;return{submitted,get replayChecks(){return replayChecks;},writer:async()=> 'CF2_WRITER',getObject:async()=>null,hasProof:async()=>false,replayCommand:async()=>{replayChecks++;return replay;},submitCommand:async value=>(submitted.push(value),{accepted:true,resulting_state_version:1})};};
 
 test('only ACTOR:DIEGO acting as DGA can assign a TASK to CLAUDE_CODE',async()=>{
   const target=store(),roles=new ProductionRoleInterface(target),result=await roles.submitRoleCommand({principal:principals.DIEGO,acting_role:'DGA',command:command('CANARY:ACL:DIEGO','CLAUDE_CODE')});
@@ -29,6 +29,11 @@ test('only ACTOR:DIEGO acting as DGA can assign a TASK to CLAUDE_CODE',async()=>
 test('Diego cannot use PRODUCTOR_MUSICAL to assign CLAUDE_CODE',async()=>{
   const target=store(),roles=new ProductionRoleInterface(target),result=await roles.submitRoleCommand({principal:principals.DIEGO,acting_role:'PRODUCTOR_MUSICAL',command:command('CANARY:ACL:DIEGO:MUSIC','CLAUDE_CODE')});
   assert.equal(result.reason_code,'ROLE_FORBIDDEN');assert.equal(target.submitted.length,0);
+});
+
+test('an unauthorized actor cannot bypass the assignment ACL through idempotent replay',async()=>{
+  const target=store({accepted:true,replay:true,resulting_state_version:1}),roles=new ProductionRoleInterface(target),result=await roles.submitRoleCommand({principal:principals.GABY_CHAT,acting_role:'GABY_CHAT',command:command('CANARY:ACL:REPLAY','CLAUDE_CODE')});
+  assert.equal(result.reason_code,'ROLE_FORBIDDEN');assert.equal(target.replayChecks,0);assert.equal(target.submitted.length,0);
 });
 
 for(const [name,acting_role] of [['GABY_CHAT','GABY_CHAT'],['GABY_CW','GABY_CW_AUDIOVISUAL'],['CODEX','CODEX']]){
