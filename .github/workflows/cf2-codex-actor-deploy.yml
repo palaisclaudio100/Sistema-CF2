@@ -41,8 +41,8 @@ jobs:
           if service.get('branch')!='master' or 'palaisclaudio100/Sistema-CF2' not in service.get('repo',''):raise SystemExit('SERVICE_SOURCE_MISMATCH')
           if service.get('autoDeploy') not in ('no',False):raise SystemExit('AUTODEPLOY_NOT_OFF')
           envs=call('GET',f'/services/{service_id}/env-vars');keys={row.get('envVar',row).get('key') for row in envs}
-          required={'CF2_DATABASE_URL','CF2_GOOGLE_OAUTH_CLIENT_ID','CF2_GOOGLE_OAUTH_CLIENT_SECRET'}
-          if not required.issubset(keys):raise SystemExit('PRODUCTION_CONFIGURATION_MISSING')
+          required={'CF2_GOOGLE_OAUTH_CLIENT_ID','CF2_GOOGLE_OAUTH_CLIENT_SECRET'}
+          if not required.issubset(keys) or not {'CF2_DATABASE_URL','DATABASE_URL'}.intersection(keys):raise SystemExit('PRODUCTION_CONFIGURATION_MISSING')
           created=call('POST',f'/services/{service_id}/deploys',{'commitId':commit});deploy=created.get('deploy',created);deploy_id=deploy.get('id')
           if not deploy_id:raise SystemExit('DEPLOY_ID_MISSING')
           deadline=time.monotonic()+1200
