@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import {CUTOVER_PRINCIPAL} from './github-oidc.mjs';
+import {canaryIsolationValid,TERMINAL_TASK_STATES,validateWriterToolArgs} from './writer-contract.mjs';
 
 export const MINIMUM_SCOPE=Object.freeze(['TASK','VERIFICATION']);
 export const CUTOVER_AUTHORITY_REF='AUTHORITY:CLAUDIO_PALAIS:CF2_MINIMUM_CUTOVER:TASK_VERIFICATION';
@@ -28,14 +29,32 @@ export class ProductionRoleInterface{
     if(!principal?.actor_id||!operationalRoles[principal.actor_id]?.includes(acting_role)||!principal.allowed_roles?.includes(acting_role))return{accepted:false,reason_code:'ROLE_FORBIDDEN'};
     if(!command||command.actor_id||command.actor_role||command.acting_role||command.payload?.object?.actor_id||command.payload?.object?.actor_role)return{accepted:false,reason_code:'ACTOR_MISMATCH'};
     if(!allowed.has(command.command_type))return{accepted:false,reason_code:'ROLE_FORBIDDEN'};
+    const tool=command.command_type==='RECORD_VERIFICATION'?'submit_verification':'submit_task_command';
+    if(!validateWriterToolArgs(tool,{acting_role,command},principal.allowed_roles))return{accepted:false,reason_code:'INVALID_SCHEMA'};
+    if(!canaryIsolationValid(command))return{accepted:false,reason_code:'CANARY_NAMESPACE_VIOLATION'};
     const object=command.payload?.object;
-    if(command.command_type==='RECORD_VERIFICATION'&&(!object||object.type!=='VERIFICATION'||!object.evidence_ref))return{accepted:false,reason_code:'EVIDENCE_REQUIRED'};
-    if(command.command_type==='CREATE_TASK'&&(!object||object.type!=='TASK'||(principal.actor_id!=='ACTOR:DIEGO'&&object.responsible_role!==acting_role)))return{accepted:false,reason_code:'ROLE_FORBIDDEN'};
-    if(command.command_type==='TRANSITION_TASK'&&principal.actor_id!=='ACTOR:DIEGO'){
-      const task=await this.store.getObject(command.payload?.task_id);if(!task||task.type!=='TASK'||task.responsible_role!==acting_role)return{accepted:false,reason_code:'ROLE_FORBIDDEN'};
+    const secured={...command,actor_id:principal.actor_id,actor_role:acting_role,issued_at:new Date().toISOString(),payload:{...command.payload,...(object?{object:{...object,...(command.command_type==='RECORD_VERIFICATION'?{verified_by:principal.actor_id}:{})}}:{})}};
+    const replay=await this.store.replayCommand?.(secured);if(replay)return{...replay,command_id:secured.command_id,actor_id:principal.actor_id,acting_role};
+    if(command.command_type==='CREATE_TASK'){
+      if(principal.actor_id!=='ACTOR:DIEGO'&&object.responsible_role!==acting_role)return{accepted:false,reason_code:'ROLE_FORBIDDEN'};
+      if(await this.store.getObject(object.id))return{accepted:false,reason_code:'OBJECT_ALREADY_EXISTS'};
+      if(object.state==='DONE'&&!(await this.store.hasProof(object.closure_ref)))return{accepted:false,reason_code:'MISSING_CLOSURE_PROOF'};
+    }
+    if(command.command_type==='TRANSITION_TASK'){
+      const task=await this.store.getObject(command.payload.task_id);
+      if(!task||task.type!=='TASK')return{accepted:false,reason_code:'UNKNOWN_SUBJECT'};
+      if(principal.actor_id!=='ACTOR:DIEGO'&&task.responsible_role!==acting_role)return{accepted:false,reason_code:'ROLE_FORBIDDEN'};
+      if(TERMINAL_TASK_STATES.includes(task.state)&&task.state!==command.payload.state)return{accepted:false,reason_code:'INVALID_STATE_TRANSITION'};
+      if(command.payload.state==='DONE'&&!(await this.store.hasProof(command.payload.closure_ref)))return{accepted:false,reason_code:'MISSING_CLOSURE_PROOF'};
+    }
+    if(command.command_type==='RECORD_VERIFICATION'){
+      if(await this.store.getObject(object.id))return{accepted:false,reason_code:'OBJECT_ALREADY_EXISTS'};
+      if(!(await this.store.hasProof(object.evidence_ref)))return{accepted:false,reason_code:'PROOF_NOT_FOUND'};
+      const subject=await this.store.getObject(object.subject_id);
+      if(!subject)return{accepted:false,reason_code:'UNKNOWN_SUBJECT'};
+      if(principal.actor_id!=='ACTOR:DIEGO'&&(subject.type!=='TASK'||subject.responsible_role!==acting_role))return{accepted:false,reason_code:'ROLE_FORBIDDEN'};
     }
     for(const domain of [command.command_type==='RECORD_VERIFICATION'?'VERIFICATION':'TASK'])if(await this.store.writer(domain)!=='CF2_WRITER')return{accepted:false,reason_code:'WRITER_NOT_AUTHORIZED'};
-    const secured={...command,actor_id:principal.actor_id,actor_role:acting_role,issued_at:new Date().toISOString(),payload:{...command.payload,...(object?{object:{...object,...(command.command_type==='RECORD_VERIFICATION'?{verified_by:principal.actor_id}:{})}}:{})}};
     const result=await this.store.submitCommand(secured);return{...result,command_id:secured.command_id,actor_id:principal.actor_id,acting_role};
   }
 }

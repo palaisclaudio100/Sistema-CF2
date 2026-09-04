@@ -22,8 +22,8 @@ test('OAuth metadata is PKCE-only public-client compatible and redirect validati
 test('MCP exposes exactly the five authorized operations',()=>assert.deepEqual(MCP_TOOLS.map(tool=>tool.name),['get_my_tasks','get_task','submit_task_command','submit_verification','get_status']));
 
 test('operational RoleInterface injects identity and rejects cross-role or impersonation',async()=>{
-  const submitted=[],store={writer:async()=> 'CF2_WRITER',getObject:async()=>({id:'TASK:X',type:'TASK',responsible_role:'GABY_CHAT'}),submitCommand:async command=>(submitted.push(command),{accepted:true,resulting_state_version:9})},roles=new ProductionRoleInterface(store),chat={actor_id:'ACTOR:GABY_CHAT',allowed_roles:MCP_ACTOR_ROLES['ACTOR:GABY_CHAT']};
-  const base={command_id:'COMMAND:X',command_type:'CREATE_TASK',idempotency_key:'IDEMPOTENCY:X',payload:{object:{id:'TASK:X',type:'TASK',state:'OPEN',status:'OPEN',responsible_role:'GABY_CHAT',created_at:'2026-09-03T00:00:00Z',updated_at:'2026-09-03T00:00:00Z'}}};
+  const submitted=[],store={writer:async()=> 'CF2_WRITER',getObject:async()=>null,hasProof:async()=>false,submitCommand:async command=>(submitted.push(command),{accepted:true,resulting_state_version:9})},roles=new ProductionRoleInterface(store),chat={actor_id:'ACTOR:GABY_CHAT',allowed_roles:MCP_ACTOR_ROLES['ACTOR:GABY_CHAT']};
+  const base={command_id:'COMMAND:X',command_type:'CREATE_TASK',idempotency_key:'IDEMPOTENCY:X',payload:{object:{id:'TASK:X',type:'TASK',state:'OPEN',status:'OPEN',responsible_role:'GABY_CHAT',created_at:'2026-09-03T00:00:00Z',updated_at:'2026-09-03T00:00:00Z',basis_ref:['TEST'],action:'TEST',related_ids:[]}}};
   assert.equal((await roles.submitRoleCommand({principal:chat,acting_role:'GABY_CHAT',command:base})).accepted,true);assert.equal(submitted[0].actor_id,'ACTOR:GABY_CHAT');assert.equal(submitted[0].actor_role,'GABY_CHAT');
   assert.equal((await roles.submitRoleCommand({principal:chat,acting_role:'GABY_CW_AUDIOVISUAL',command:base})).reason_code,'ROLE_FORBIDDEN');
   assert.equal((await roles.submitRoleCommand({principal:chat,acting_role:'GABY_CHAT',command:{...base,actor_id:'ACTOR:DIEGO'}})).reason_code,'ACTOR_MISMATCH');
