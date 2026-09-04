@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {ProductionRoleInterface,CUTOVER_AUTHORITY_REF,MINIMUM_SCOPE} from './production-role-interface.mjs';
+import {OutboxConsumer} from './outbox-consumer.mjs';
 
 const now=()=>new Date().toISOString();
 const canonical=value=>value instanceof Date?value.toISOString():Array.isArray(value)?value.map(canonical):value&&typeof value==='object'?Object.fromEntries(Object.keys(value).sort().map(key=>[key,canonical(value[key])])):value;
@@ -45,7 +46,7 @@ export class ProductionCutoverCoordinator{
     const verification=await roles.submit({principal,authority_ref,scope,command:{command_id:'COMMAND:CANARY:VERIFY:001',command_type:'RECORD_VERIFICATION',idempotency_key:'canary-verify-001',payload:{object:{id:'VERIFICATION:CANARY:CF2_MINIMUM_CUTOVER:001',type:'VERIFICATION',status:'CURRENT',created_at:stamp,updated_at:stamp,basis_ref:[authority_ref],subject_id:taskId,attribute:'CUTOVER_HEALTH',value:true,class:'FIJO',verified_at:stamp,verified_by:principal.actor_id,evidence_ref:proofRef}}}});
     const done=await roles.submit({principal,authority_ref,scope,command:{command_id:'COMMAND:CANARY:DONE:001',command_type:'TRANSITION_TASK',idempotency_key:'canary-done-001',payload:{task_id:taskId,state:'DONE',closure_ref:proofRef}}}),readback=await roles.readTask(taskId),status=await roles.status('COMMAND:CANARY:DONE:001');
     if(!create.accepted||noProof.reason_code!=='MISSING_CLOSURE_PROOF'||!verification.accepted||!done.accepted||readback?.state!=='DONE'||status.status!=='ACCEPTED')throw new Error('CANARY_FAILED');
-    await this.store.pool.query("UPDATE outbox SET status='CONSUMED' WHERE status='PENDING' AND payload->>'producer'='CORE_PROD'");
+    await new OutboxConsumer(this.store).runOnce();
     await this.#journal('POST_CUTOVER_CHECK',{writers:Object.fromEntries(await Promise.all(MINIMUM_SCOPE.map(async domain=>[domain,await this.store.writer(domain)]))),outbox_no_side_effect:true},principal);await this.#journal('CANARY',{task_id:taskId,proof_ref:proofRef,result:'PASS',no_proof_rejection:noProof.reason_code},principal);await this.#journal('STABILIZATION_STARTED',{scope:MINIMUM_SCOPE},principal);
     return{result:'PASS_STABILIZATION_STARTED',decision_id:decision.decision_id,writers:Object.fromEntries(await Promise.all(MINIMUM_SCOPE.map(async domain=>[domain,await this.store.writer(domain)]))),canary:{create,no_proof:noProof,verification,done,readback,status},journal_entries:Number((await this.store.pool.query('SELECT count(*)::int count FROM cutover_journal')).rows[0].count)};}catch(error){await this.#rollbackR1(principal,error.message);throw new Error(`ROLLED_BACK:${error.message}`);}
   }
