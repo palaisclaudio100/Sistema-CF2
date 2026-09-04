@@ -21,6 +21,30 @@ test('OAuth metadata is PKCE-only public-client compatible and redirect validati
 
 test('MCP exposes exactly the five authorized operations',()=>assert.deepEqual(MCP_TOOLS.map(tool=>tool.name),['get_my_tasks','get_task','submit_task_command','submit_verification','get_status']));
 
+const dgaReadFixture=()=>{
+  const tasks=[
+    {id:'TASK:READ:DGA',type:'TASK',status:'OPEN',state:'OPEN',responsible_role:'DGA'},
+    {id:'TASK:READ:GABY_CHAT',type:'TASK',status:'OPEN',state:'OPEN',responsible_role:'GABY_CHAT'}
+  ];
+  const pool={query:async sql=>{
+    if(sql.includes('FROM mcp_oauth_sessions'))return{rows:[{actor_id:'ACTOR:DIEGO'}]};
+    if(sql.includes("FROM objects WHERE type='TASK' ORDER BY"))return{rows:tasks.map(body=>({body}))};
+    throw new Error(`UNEXPECTED_QUERY:${sql}`);
+  }};
+  const store={pool,getObject:async id=>tasks.find(task=>task.id===id)??null};
+  const server=new RemoteMcpServer(store,{baseUrl:'https://cf2-prod-core.onrender.com',roleInterface:{}});
+  const call=async(name,args)=>{
+    let body='';const response={writeHead(){return this;},end(value=''){body=value;return this;}};
+    const request={method:'POST',headers:{authorization:'Bearer read-only-test','mcp-protocol-version':MCP_PROTOCOL_VERSION},socket:{remoteAddress:'127.0.0.1'}};
+    await server.handleMcp(request,response,new URL('https://cf2-prod-core.onrender.com/mcp/diego'),async()=>({jsonrpc:'2.0',id:1,method:'tools/call',params:{name,arguments:args}}));
+    return JSON.parse(body).result.structuredContent;
+  };
+  return{call};
+};
+
+test('OWN-01 Diego retains global task visibility through get_my_tasks',async()=>{const {call}=dgaReadFixture(),result=await call('get_my_tasks',{limit:10});assert.equal(result.result,'PASS');assert.deepEqual(new Set(result.tasks.map(task=>task.responsible_role)),new Set(['DGA','GABY_CHAT']));});
+test('OWN-02 Diego retains direct read access to a GABY_CHAT task',async()=>{const {call}=dgaReadFixture(),result=await call('get_task',{task_id:'TASK:READ:GABY_CHAT'});assert.equal(result.result,'PASS');assert.equal(result.task.responsible_role,'GABY_CHAT');});
+
 test('operational RoleInterface injects identity and rejects cross-role or impersonation',async()=>{
   const submitted=[],store={writer:async()=> 'CF2_WRITER',getObject:async()=>null,hasProof:async()=>false,submitCommand:async command=>(submitted.push(command),{accepted:true,resulting_state_version:9})},roles=new ProductionRoleInterface(store),chat={actor_id:'ACTOR:GABY_CHAT',allowed_roles:MCP_ACTOR_ROLES['ACTOR:GABY_CHAT']};
   const base={command_id:'COMMAND:X',command_type:'CREATE_TASK',idempotency_key:'IDEMPOTENCY:X',payload:{object:{id:'TASK:X',type:'TASK',state:'OPEN',status:'OPEN',responsible_role:'GABY_CHAT',created_at:'2026-09-03T00:00:00Z',updated_at:'2026-09-03T00:00:00Z',basis_ref:['TEST'],action:'TEST',related_ids:[]}}};

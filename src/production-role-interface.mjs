@@ -36,14 +36,14 @@ export class ProductionRoleInterface{
     const secured={...command,actor_id:principal.actor_id,actor_role:acting_role,issued_at:new Date().toISOString(),payload:{...command.payload,...(object?{object:{...object,...(command.command_type==='RECORD_VERIFICATION'?{verified_by:principal.actor_id}:{})}}:{})}};
     const replay=await this.store.replayCommand?.(secured);if(replay)return{...replay,command_id:secured.command_id,actor_id:principal.actor_id,acting_role};
     if(command.command_type==='CREATE_TASK'){
-      if(principal.actor_id!=='ACTOR:DIEGO'&&object.responsible_role!==acting_role)return{accepted:false,reason_code:'ROLE_FORBIDDEN'};
+      if(object.responsible_role!==acting_role)return{accepted:false,reason_code:'ROLE_FORBIDDEN'};
       if(await this.store.getObject(object.id))return{accepted:false,reason_code:'OBJECT_ALREADY_EXISTS'};
       if(object.state==='DONE'&&!(await this.store.hasProof(object.closure_ref)))return{accepted:false,reason_code:'MISSING_CLOSURE_PROOF'};
     }
     if(command.command_type==='TRANSITION_TASK'){
       const task=await this.store.getObject(command.payload.task_id);
       if(!task||task.type!=='TASK')return{accepted:false,reason_code:'UNKNOWN_SUBJECT'};
-      if(principal.actor_id!=='ACTOR:DIEGO'&&task.responsible_role!==acting_role)return{accepted:false,reason_code:'ROLE_FORBIDDEN'};
+      if(task.responsible_role!==acting_role)return{accepted:false,reason_code:'ROLE_FORBIDDEN'};
       if(TERMINAL_TASK_STATES.includes(task.state)&&task.state!==command.payload.state)return{accepted:false,reason_code:'INVALID_STATE_TRANSITION'};
       if(command.payload.state==='DONE'&&!(await this.store.hasProof(command.payload.closure_ref)))return{accepted:false,reason_code:'MISSING_CLOSURE_PROOF'};
     }
@@ -52,7 +52,8 @@ export class ProductionRoleInterface{
       if(!(await this.store.hasProof(object.evidence_ref)))return{accepted:false,reason_code:'PROOF_NOT_FOUND'};
       const subject=await this.store.getObject(object.subject_id);
       if(!subject)return{accepted:false,reason_code:'UNKNOWN_SUBJECT'};
-      if(principal.actor_id!=='ACTOR:DIEGO'&&(subject.type!=='TASK'||subject.responsible_role!==acting_role))return{accepted:false,reason_code:'ROLE_FORBIDDEN'};
+      if(subject.type==='TASK'&&subject.responsible_role!==acting_role)return{accepted:false,reason_code:'ROLE_FORBIDDEN'};
+      if(principal.actor_id!=='ACTOR:DIEGO'&&subject.type!=='TASK')return{accepted:false,reason_code:'ROLE_FORBIDDEN'};
     }
     for(const domain of [command.command_type==='RECORD_VERIFICATION'?'VERIFICATION':'TASK'])if(await this.store.writer(domain)!=='CF2_WRITER')return{accepted:false,reason_code:'WRITER_NOT_AUTHORIZED'};
     const result=await this.store.submitCommand(secured);return{...result,replay:false,command_id:secured.command_id,actor_id:principal.actor_id,acting_role};
