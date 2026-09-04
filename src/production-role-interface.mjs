@@ -55,6 +55,6 @@ export class ProductionRoleInterface{
       if(principal.actor_id!=='ACTOR:DIEGO'&&(subject.type!=='TASK'||subject.responsible_role!==acting_role))return{accepted:false,reason_code:'ROLE_FORBIDDEN'};
     }
     for(const domain of [command.command_type==='RECORD_VERIFICATION'?'VERIFICATION':'TASK'])if(await this.store.writer(domain)!=='CF2_WRITER')return{accepted:false,reason_code:'WRITER_NOT_AUTHORIZED'};
-    const result=await this.store.submitCommand(secured);return{...result,command_id:secured.command_id,actor_id:principal.actor_id,acting_role};
+    const result=await this.store.submitCommand(secured);return{...result,replay:false,command_id:secured.command_id,actor_id:principal.actor_id,acting_role};
   }
 }
