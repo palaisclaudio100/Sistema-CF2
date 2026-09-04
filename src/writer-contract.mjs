@@ -30,10 +30,15 @@ const commandSchema=(command_type,payload)=>({type:'object',additionalProperties
 const createTaskCommand=commandSchema('CREATE_TASK',{type:'object',additionalProperties:false,required:['object'],properties:{object:taskObject}});
 const transitionTaskCommand=commandSchema('TRANSITION_TASK',{type:'object',additionalProperties:false,required:['task_id','state'],properties:{task_id:{type:'string',minLength:1},state:{enum:TASK_STATES},closure_ref:{type:'string',minLength:1}}});
 const verificationCommand=commandSchema('RECORD_VERIFICATION',{type:'object',additionalProperties:false,required:['object'],properties:{object:verificationObject}});
-const toolSchema=command=>({type:'object',additionalProperties:false,required:['acting_role','command'],properties:{acting_role:{enum:ACTING_ROLES},command}});
+const toolSchema=(command,actingRoles)=>({type:'object',additionalProperties:false,required:['acting_role','command'],properties:{acting_role:{enum:Object.freeze([...actingRoles])},command}});
 
-export const SUBMIT_TASK_COMMAND_SCHEMA=Object.freeze(toolSchema({oneOf:[createTaskCommand,transitionTaskCommand]}));
-export const SUBMIT_VERIFICATION_SCHEMA=Object.freeze(toolSchema(verificationCommand));
+export function writerSchemasForRoles(actingRoles){
+  if(!Array.isArray(actingRoles)||actingRoles.length===0||actingRoles.some(role=>typeof role!=='string'||!role))throw new Error('ACTING_ROLES_REQUIRED');
+  return Object.freeze({
+    submit_task_command:Object.freeze(toolSchema({oneOf:[createTaskCommand,transitionTaskCommand]},actingRoles)),
+    submit_verification:Object.freeze(toolSchema(verificationCommand,actingRoles))
+  });
+}
 
 const allowedCommandKeys=new Set(['command_id','command_type','idempotency_key','payload',...commandOptional]);
 const taskKeys=new Set(['id','type','status','created_at','updated_at','basis_ref','superseded_by','action','state','responsible_role','related_ids','due_at','closure_ref','requires_local_capability','block_reason','non_productive']);

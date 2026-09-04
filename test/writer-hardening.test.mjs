@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {MCP_ACTOR_ROLES,MCP_TOOLS} from '../src/remote-mcp.mjs';
+import {MCP_ACTOR_ROLES,mcpToolsFor} from '../src/remote-mcp.mjs';
 import {ProductionRoleInterface} from '../src/production-role-interface.mjs';
 import {commandFingerprint,replayIdempotencyResponse,storedIdempotencyResponse,validateWriterToolArgs} from '../src/writer-contract.mjs';
 
@@ -24,7 +24,7 @@ class Store{
 }
 const api=store=>new ProductionRoleInterface(store);
 const submit=(store,command,acting_role='DGA')=>api(store).submitRoleCommand({principal:diego,acting_role,command});
-const schema=name=>MCP_TOOLS.find(tool=>tool.name===name).inputSchema;
+const schema=name=>mcpToolsFor(diego).find(tool=>tool.name===name).inputSchema;
 
 test('P0-01 submit_task_command publishes a closed discriminated schema',()=>{const value=schema('submit_task_command');assert.deepEqual(value.properties.acting_role.enum,['DGA','PRODUCTOR_MUSICAL']);assert.equal(value.properties.command.oneOf.length,2);assert.deepEqual(value.properties.command.oneOf.map(x=>x.properties.command_type.const),['CREATE_TASK','TRANSITION_TASK']);assert.equal(value.additionalProperties,false);assert.equal(value.properties.command.oneOf.every(x=>x.additionalProperties===false),true);});
 test('P0-02 submit_verification publishes its complete closed schema',()=>{const value=schema('submit_verification'),command=value.properties.command;assert.deepEqual(value.properties.acting_role.enum,['DGA','PRODUCTOR_MUSICAL']);assert.equal(command.properties.command_type.const,'RECORD_VERIFICATION');assert.equal(command.additionalProperties,false);assert.deepEqual(command.properties.payload.properties.object.properties.class.enum,['FIJO','VOLÁTIL','CONDICIONAL']);});
