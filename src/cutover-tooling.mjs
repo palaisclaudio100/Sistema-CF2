@@ -14,7 +14,7 @@ export const ROLE_ROUTING = Object.freeze({
   GABY_CHAT: Object.freeze({ actor_role: 'GABY_CHAT', domains: ['MARKETING', 'COMMUNICATION', 'METRICS', 'CAMPAIGNS', 'CALENDAR', 'PITCHING', 'DISTRIBUTION', 'OPERATIONAL_COORDINATION'] }),
   GABY_CW_AUDIOVISUAL: Object.freeze({ actor_role: 'GABY_CW', domains: ['FULL_VIDEO', 'VIDEOCLIP', 'REEL', 'SHORT', 'STORY', 'EDITING', 'VISUAL_PRODUCTION'] }),
   GABY_CW_DOCUMENTAL: Object.freeze({ actor_role: 'GABY_CW', domains: ['GOVERNED_DOCUMENT_EXECUTION'] }),
-  CODEX: Object.freeze({ actor_role: null, domains: ['ENGINEERING', 'INFRASTRUCTURE'], operational_runtime: false }),
+  CODEX: Object.freeze({ actor_role: 'CODEX', domains: ['ENGINEERING', 'INFRASTRUCTURE'], operational_runtime: false }),
   CLAUDE_CODE: Object.freeze({ actor_role: null, domains: ['AUXILIARY_ENGINEERING'], operational_runtime: false })
 });
 export const WRITERS = Object.freeze({ CF1: 'CF1_WRITER', LOCKED: 'TRANSITION_LOCKED', CF2: 'CF2_WRITER', ROLLBACK: 'ROLLBACK_LOCKED' });

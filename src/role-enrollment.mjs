@@ -7,10 +7,12 @@ export const ENROLLMENT_SPECS=Object.freeze([
   Object.freeze({enrollment_id:'ENROLLMENT:GABY_CHAT',actor_id:'ACTOR:GABY_CHAT'}),
   Object.freeze({enrollment_id:'ENROLLMENT:GABY_CW',actor_id:'ACTOR:GABY_CW'})
 ]);
+export const CODEX_ENROLLMENT_SPEC=Object.freeze({enrollment_id:'ENROLLMENT:CODEX',actor_id:'ACTOR:CODEX'});
 
 const ACTOR_ROLES=Object.freeze({
   'ACTOR:GABY_CHAT':Object.freeze(['GABY_CHAT']),
-  'ACTOR:GABY_CW':Object.freeze(['GABY_CW_AUDIOVISUAL','GABY_CW_DOCUMENTAL'])
+  'ACTOR:GABY_CW':Object.freeze(['GABY_CW_AUDIOVISUAL','GABY_CW_DOCUMENTAL']),
+  'ACTOR:CODEX':Object.freeze(['CODEX'])
 });
 const b64=value=>Buffer.from(JSON.stringify(value)).toString('base64url');
 const digest=value=>crypto.createHash('sha256').update(value).digest('hex');
@@ -37,6 +39,18 @@ export class RoleEnrollmentService{
         result.push({...spec,url:`${this.baseUrl}/role/enroll#token=${token}`});
       }
       await client.query('COMMIT');return result;
+    }catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
+  }
+
+  async createCodexEnrollment(){
+    const spec=CODEX_ENROLLMENT_SPEC,client=await this.pool.connect(),createdAt=new Date(this.clock()),expiresAt=new Date(this.clock()+ENROLLMENT_TTL_SECONDS*1000),token=randomToken();
+    try{
+      await client.query('BEGIN');
+      const existing=await client.query('SELECT enrollment_id FROM role_gateway_enrollments WHERE enrollment_id=$1 FOR UPDATE',[spec.enrollment_id]);
+      if(existing.rowCount)throw new Error('ENROLLMENT_ALREADY_EXISTS');
+      await client.query('INSERT INTO role_gateway_enrollments(enrollment_id,actor_id,token_hash,status,created_at,expires_at) VALUES($1,$2,$3,$4,$5,$6)',[spec.enrollment_id,spec.actor_id,digest(token),'PENDING',createdAt,expiresAt]);
+      await this.#audit(client,{enrollment_id:spec.enrollment_id,actor_id:spec.actor_id,operation:'CREATED',accepted:true,reason_code:'PENDING'});
+      await client.query('COMMIT');return{...spec,url:`${this.baseUrl}/role/enroll#token=${token}`};
     }catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
   }
 

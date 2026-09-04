@@ -10,6 +10,7 @@
     "test": "node --test",
     "check": "node scripts/lint.mjs && node scripts/validate-contracts.mjs && node --test",
     "migrate:prod": "node scripts/migrate-prod.mjs",
+    "enroll:codex": "node scripts/create-codex-enrollment.mjs",
     "verify:prod-health": "node scripts/verify-prod-health.mjs",
     "start:prod": "node src/prod-service.mjs"
   },

@@ -25,7 +25,8 @@ test('MCP exposes exactly the five authorized operations',()=>assert.deepEqual(m
 const endpointByActor={
   'ACTOR:DIEGO':'/mcp/diego',
   'ACTOR:GABY_CHAT':'/mcp/gaby-chat',
-  'ACTOR:GABY_CW':'/mcp/gaby-cw'
+  'ACTOR:GABY_CW':'/mcp/gaby-cw',
+  'ACTOR:CODEX':'/mcp/codex'
 };
 const toolsListFor=async actor_id=>{
   const pool={query:async sql=>{if(sql.includes('FROM mcp_oauth_sessions'))return{rows:[{actor_id}]};throw new Error(`UNEXPECTED_QUERY:${sql}`);}};
@@ -42,6 +43,7 @@ const chatVerificationCommand={command_id:'COMMAND:SCHEMA:GABY:VERIFY',command_t
 
 test('MULTI-01 Diego tools/list publishes exactly DGA and PRODUCTOR_MUSICAL',async()=>{for(const roles of writerEnums(await toolsListFor('ACTOR:DIEGO')))assert.deepEqual(roles,['DGA','PRODUCTOR_MUSICAL']);});
 test('MULTI-02 Gaby Chat tools/list publishes only GABY_CHAT',async()=>{for(const roles of writerEnums(await toolsListFor('ACTOR:GABY_CHAT')))assert.deepEqual(roles,['GABY_CHAT']);});
+test('MULTI-02B Codex publishes TASK tools without verification',async()=>{const tools=await toolsListFor('ACTOR:CODEX');assert.deepEqual(tools.map(tool=>tool.name),['get_my_tasks','get_task','submit_task_command','get_status']);for(const roles of writerEnums(tools))assert.deepEqual(roles,['CODEX']);});
 test('MULTI-03 Gaby Chat can construct a valid submit_task_command',async()=>{const tools=await toolsListFor('ACTOR:GABY_CHAT'),schema=tools.find(tool=>tool.name==='submit_task_command').inputSchema;assert.deepEqual(schema.properties.acting_role.enum,['GABY_CHAT']);assert.equal(validateWriterToolArgs('submit_task_command',{acting_role:'GABY_CHAT',command:chatTaskCommand},['GABY_CHAT']),true);});
 test('MULTI-04 Gaby Chat can construct a valid submit_verification',async()=>{const tools=await toolsListFor('ACTOR:GABY_CHAT'),schema=tools.find(tool=>tool.name==='submit_verification').inputSchema;assert.deepEqual(schema.properties.acting_role.enum,['GABY_CHAT']);assert.equal(validateWriterToolArgs('submit_verification',{acting_role:'GABY_CHAT',command:chatVerificationCommand},['GABY_CHAT']),true);});
 test('MULTI-05 Gaby Chat cannot act as DGA',()=>assert.equal(validateWriterToolArgs('submit_task_command',{acting_role:'DGA',command:chatTaskCommand},['GABY_CHAT']),false));

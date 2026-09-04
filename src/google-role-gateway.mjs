@@ -5,7 +5,8 @@ export const OAUTH_SCOPES=Object.freeze(['openid','email','profile']);
 export const ROLE_PRINCIPALS=Object.freeze({
   'ACTOR:DIEGO':Object.freeze(['DGA','PRODUCTOR_MUSICAL']),
   'ACTOR:GABY_CHAT':Object.freeze(['GABY_CHAT']),
-  'ACTOR:GABY_CW':Object.freeze(['GABY_CW_AUDIOVISUAL','GABY_CW_DOCUMENTAL'])
+  'ACTOR:GABY_CW':Object.freeze(['GABY_CW_AUDIOVISUAL','GABY_CW_DOCUMENTAL']),
+  'ACTOR:CODEX':Object.freeze(['CODEX'])
 });
 
 const b64url=value=>Buffer.from(value,'base64url');

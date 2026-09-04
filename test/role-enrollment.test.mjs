@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {RoleEnrollmentService,ENROLLMENT_SPECS,ENROLLMENT_TTL_SECONDS,enrollmentPage} from '../src/role-enrollment.mjs';
+import {RoleEnrollmentService,ENROLLMENT_SPECS,CODEX_ENROLLMENT_SPEC,ENROLLMENT_TTL_SECONDS,enrollmentPage} from '../src/role-enrollment.mjs';
 import {RoleAuthorizer} from '../src/google-role-gateway.mjs';
 
 class MemoryPool{
@@ -66,4 +66,12 @@ test('browser enrollment confirmation never returns bearer or refresh credential
   const result=await service.consume({...target,human_fingerprint:'c'.repeat(64),issueCredentials:false});
   assert.deepEqual(result,{result:'ENROLLMENT_PASS',actor_id:'ACTOR:GABY_CHAT',allowed_roles:['GABY_CHAT']});
   assert.equal(pool.sessions.size,0);assert.equal(Object.hasOwn(result,'access_token'),false);assert.equal(Object.hasOwn(result,'refresh_token'),false);
+});
+
+test('Codex enrollment is independent from the existing Gaby pair',async()=>{
+  const pool=new MemoryPool(),service=new RoleEnrollmentService({pool},{baseUrl:'https://cf2-prod-core.onrender.com',signingSecret:'synthetic-secret-with-sufficient-entropy'});
+  const pair=await service.createPair(),codex=await service.createCodexEnrollment();
+  assert.deepEqual(pair.map(item=>item.enrollment_id),ENROLLMENT_SPECS.map(item=>item.enrollment_id));
+  assert.equal(pair.length,2);assert.equal(codex.enrollment_id,CODEX_ENROLLMENT_SPEC.enrollment_id);assert.equal(codex.actor_id,'ACTOR:CODEX');
+  assert.equal(pool.enrollments.get('ENROLLMENT:CODEX').actor_id,'ACTOR:CODEX');
 });
