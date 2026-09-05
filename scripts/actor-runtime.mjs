@@ -1,3 +1,4 @@
+import {DirectCanonReader} from '../src/direct-canon.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {spawn} from 'node:child_process';
@@ -57,5 +58,7 @@ if(process.argv[1]&&path.resolve(process.argv[1])===path.resolve(import.meta.fil
   const chunks=[];for await(const chunk of process.stdin)chunks.push(chunk);const configuration=JSON.parse(Buffer.concat(chunks).toString('utf8'));
   const runners=configuration.actors.map(a=>new LocalRoleRunner({...configuration,...a}));
   const run=async()=>{for(const runner of runners){try{const result=await runner.once();if(result.processed)process.stdout.write(JSON.stringify(result)+'\n');}catch(error){process.stderr.write(JSON.stringify({actor_id:runner.actor_id,error_code:'RUNTIME_BLOCKED',at:new Date().toISOString()})+'\n');}}};
-  if(process.argv.includes('--once'))await run();else{for(;;){await run();await new Promise(resolve=>setTimeout(resolve,5000));}}
+  const bridge=new DirectCanonReader(configuration.canonRoot);
+  async function bridgeLoop(){for(;;){try{const response=await fetch(configuration.baseUrl+'/internal/actor-runtime',{method:'POST',headers:{Authorization:'Bearer '+configuration.bridgeToken,'content-type':'application/json'},body:JSON.stringify({operation:'canon_claim',args:{}}),signal:AbortSignal.timeout(10000)});const body=await response.json();if(!response.ok)throw new Error('BRIDGE_AUTH_FAILED');const request=body.data;if(request){let result;try{result=await bridge.call(request.operation,request.arguments);}catch(error){result={error_code:['INVALID_SCHEMA','SECTION_AMBIGUOUS_OR_UNKNOWN'].includes(error.message)?error.message:'CANON_NOT_VERIFIED'};}const done=await fetch(configuration.baseUrl+'/internal/actor-runtime',{method:'POST',headers:{Authorization:'Bearer '+configuration.bridgeToken,'content-type':'application/json'},body:JSON.stringify({operation:'canon_complete',args:{request_id:request.request_id,lease_token:request.lease_token,response:result}}),signal:AbortSignal.timeout(10000)});if(!done.ok)throw new Error('BRIDGE_COMPLETION_FAILED');}}catch{process.stderr.write(JSON.stringify({component:'canon_bridge',status:'BLOCKED',at:new Date().toISOString()})+'\n');}await new Promise(r=>setTimeout(r,500));}}
+  if(process.argv.includes('--once'))await run();else{await Promise.all([bridgeLoop(),...runners.map(async runner=>{for(;;){try{const result=await runner.once();if(result.processed)process.stdout.write(JSON.stringify(result)+'\n');}catch{process.stderr.write(JSON.stringify({actor_id:runner.actor_id,error_code:'RUNTIME_BLOCKED',at:new Date().toISOString()})+'\n');}await new Promise(r=>setTimeout(r,5000));}})]);}
 }

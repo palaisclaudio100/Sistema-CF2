@@ -84,3 +84,24 @@ credential rows and cancel open workflow threads before an operational rollback.
 Official runtime references checked 2026-09-05:
 - https://developers.openai.com/codex/noninteractive/
 - https://code.claude.com/docs/en/headless
+
+## Direct operational-canon path (second implementation stage)
+
+The original missing-Control-OAuth blocker applies to the mirror adapter. The
+user explicitly allows direct access to the operational OneDrive canon. A second
+path therefore uses authenticated reverse requests in PostgreSQL: every actor
+requests canon data through CF2, a fixed-path local read-only bridge answers from
+physical OneDrive bytes, and the service delivers the response to the requesting
+actor. There is no published cache, user file transport, new role, public share,
+Control write or claim that the Drive mirror is current. Metadata explicitly says
+ONEDRIVE_CANON_DIRECT / DIRECT_CANON_VERIFIED_MIRROR_NOT_USED.
+
+Migration 009_direct_canon.sql adds expiring requests and a bridge heartbeat.
+The bridge credential is bound to existing ACTOR:CODEX and only claim/complete
+for canon requests; it cannot claim or execute model work. Work credentials are
+bound separately to the same four existing executor actors. All credentials can
+be independently revoked. Requests expire and completions use fenced leases.
+The original Google mirror adapter remains fail-closed without verified Control.
+
+Runtimes and direct-canon end-to-end validation are pending for this stage; the
+previous INCOMPLETE result must not be replaced until live evidence exists.

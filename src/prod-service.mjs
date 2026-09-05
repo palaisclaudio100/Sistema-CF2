@@ -1,5 +1,5 @@
 import {ActorTransport,PgThreadRepository,sha} from './actor-transport.mjs';
-import {CanonGateway,GoogleCanonSource} from './canon-gateway.mjs';
+import {DirectCanonGateway} from './direct-canon.mjs';
 import {OrchestrationApi} from './orchestration-api.mjs';
 import http from 'node:http';
 import { PostgresStore } from './postgres-store.mjs';
@@ -25,7 +25,7 @@ const roleBaseUrl=process.env.RENDER_EXTERNAL_URL??'https://cf2-prod-core.onrend
 const roleEnrollments=new RoleEnrollmentService(store,{baseUrl:roleBaseUrl,signingSecret:process.env.CF2_GOOGLE_OAUTH_CLIENT_SECRET});
 const operationalRoleInterface=new ProductionRoleInterface(store);
 const transport=new ActorTransport(new PgThreadRepository(store.pool));
-const canon=new CanonGateway(new GoogleCanonSource(),{onIncident:async(principal,object)=>{
+const canon=new DirectCanonGateway(store.pool,{onIncident:async(principal,object)=>{
   const thread_id='THREAD:CANON_INCIDENT:'+sha(principal.actor_id+object+new Date().toISOString().slice(0,10)).slice(0,32);
   try{await transport.start(principal,{thread_id,stages:['ACTOR:CODEX'],payload:{operation:'CANON_INCIDENT',error_code:'CANON_NOT_VERIFIED',object,external_effects:0}});}catch(error){if(error.message!=='THREAD_ALREADY_EXISTS')throw error;}
 }});
@@ -41,7 +41,7 @@ const readBody=async request=>JSON.parse((await readRawBody(request))||'{}');
 const readForm=async request=>new URLSearchParams(await readRawBody(request));
 const server=http.createServer(async(request,response)=>{
   const url=new URL(request.url,'https://cf2-prod-core.onrender.com');
-  if(request.method==='GET'&&request.url==='/health'){try{const health=await store.health(),writers=Object.fromEntries(await Promise.all(MINIMUM_SCOPE.map(async domain=>[domain,await store.writer(domain)])));return send(response,200,{service:'cf2-core',release_id:config.release_id,...health,outbox_consumer:outboxConsumer.health(),flags:{production_cutover_enabled:config.production_cutover_enabled,external_adapters_enabled:false,role_cutover_enabled:config.role_cutover_enabled},writers,oidc:authenticator?'READY':'NOT_READY',role_gateway:roleGateway.health(),remote_mcp:remoteMcp.health(),orchestration:{transport:'READY',canon_credentials:['CF2_CANON_REFRESH_TOKEN','CF2_CANON_CLIENT_ID','CF2_CANON_CLIENT_SECRET'].every(k=>process.env[k])?'CONFIGURED':'MISSING',runtime_heartbeats:(await store.pool.query('SELECT actor_id,body,updated_at FROM actor_runtime_heartbeats')).rows}});}catch{return send(response,503,{service:'cf2-core',database:'DOWN'});}}
+  if(request.method==='GET'&&request.url==='/health'){try{const health=await store.health(),writers=Object.fromEntries(await Promise.all(MINIMUM_SCOPE.map(async domain=>[domain,await store.writer(domain)])));return send(response,200,{service:'cf2-core',release_id:config.release_id,...health,outbox_consumer:outboxConsumer.health(),flags:{production_cutover_enabled:config.production_cutover_enabled,external_adapters_enabled:false,role_cutover_enabled:config.role_cutover_enabled},writers,oidc:authenticator?'READY':'NOT_READY',role_gateway:roleGateway.health(),remote_mcp:remoteMcp.health(),orchestration:{transport:'READY',canon_source:'ONEDRIVE_DIRECT_BRIDGE',runtime_heartbeats:(await store.pool.query('SELECT actor_id,body,updated_at FROM actor_runtime_heartbeats')).rows}});}catch{return send(response,503,{service:'cf2-core',database:'DOWN'});}}
   if(url.pathname==='/internal/actor-runtime'&&request.method==='POST'){
     let principal;try{principal=await orchestration.authenticateWorker(request);}catch{return send(response,503,{error_code:'TRANSPORT_UNAVAILABLE'});}if(!principal)return send(response,401,{error_code:'AUTH_REJECTED'});
     try{const body=await readBody(request);if(Object.keys(body).some(k=>!['operation','args'].includes(k)))throw new Error('INVALID_SCHEMA');return send(response,200,{result:'PASS',data:await orchestration.worker(principal,body.operation,body.args??{})});}catch(error){return send(response,409,{result:'FAIL_CLOSED',error_code:['ROLE_FORBIDDEN','INVALID_SCHEMA','LEASE_REJECTED','CANON_NOT_VERIFIED','THREAD_ALREADY_EXISTS','THREAD_UNKNOWN','THREAD_TERMINAL','THREAD_NOT_COMPLETE','IDEMPOTENCY_CONFLICT','INVALID_STATE'].includes(error.message)?error.message:'FAIL_CLOSED'});}
