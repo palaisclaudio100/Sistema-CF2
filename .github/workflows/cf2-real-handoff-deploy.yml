@@ -15,7 +15,7 @@ jobs:
     env:
       RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
       SERVICE_ID: srv-daa8dngae00c73a3m15g
-      TARGET_COMMIT: ${{ github.sha }}
+      TARGET_COMMIT: 6c446a37952949e49e82f4ddc0689ff018d35534
       CORE_URL: https://cf2-prod-core.onrender.com
     steps:
       - name: Verify exact service and deploy exact commit once
@@ -35,6 +35,15 @@ jobs:
           if service.get('type') not in ('web_service','web'): raise SystemExit('SERVICE_TYPE_MISMATCH')
           if service.get('branch')!='master' or 'palaisclaudio100/Sistema-CF2' not in service.get('repo',''): raise SystemExit('SERVICE_SOURCE_MISMATCH')
           if service.get('autoDeploy') not in ('no',False): raise SystemExit('AUTODEPLOY_NOT_OFF')
+          env_rows=call('GET',f'/services/{service_id}/env-vars'); env_rows=[row.get('envVar',row) for row in env_rows]
+          env_before={row.get('key'):row.get('value') for row in env_rows}
+          call('PUT',f'/services/{service_id}/env-vars/CF2_RELEASE_ID',{'value':commit})
+          configured=call('GET',f'/services/{service_id}/env-vars/CF2_RELEASE_ID'); configured=configured.get('envVar',configured)
+          if configured.get('key')!='CF2_RELEASE_ID' or configured.get('value')!=commit: raise SystemExit('RELEASE_CONFIG_MISMATCH')
+          env_rows_after=call('GET',f'/services/{service_id}/env-vars'); env_rows_after=[row.get('envVar',row) for row in env_rows_after]
+          env_after={row.get('key'):row.get('value') for row in env_rows_after}
+          if set(env_before)!=set(env_after): raise SystemExit('OTHER_ENV_KEYS_CHANGED')
+          if any(key!='CF2_RELEASE_ID' and env_before.get(key)!=env_after.get(key) for key in env_before): raise SystemExit('OTHER_ENV_CHANGED')
           created=call('POST',f'/services/{service_id}/deploys',{'commitId':commit}); deploy=created.get('deploy',created); deploy_id=deploy.get('id')
           if not deploy_id: raise SystemExit('DEPLOY_ID_MISSING')
           deadline=time.monotonic()+1200
