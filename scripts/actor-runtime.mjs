@@ -12,13 +12,20 @@ export const CONTRACTS=Object.freeze({
   'ACTOR:CODEX':'Codex: engineering, infrastructure, security and traceability only. Review the technical closure proof; no musical curation, lyrics or marketing decisions.',
   'ACTOR:CLAUDE_CODE':'Claude Code: auxiliary engineering exclusively upon Diego dispatch. Review technical evidence and exit. No independent activation, daemon, artistic authority or material changes.'
 });
+export function parseRoleReport(text){
+  try{return JSON.parse(text);}catch{
+    const blocks=[...text.matchAll(/```json\s*\n([\s\S]*?)\n```/g)];
+    if(blocks.length!==1)throw new Error('EXECUTOR_INVALID_EVIDENCE');
+    try{return JSON.parse(blocks[0][1]);}catch{throw new Error('EXECUTOR_INVALID_EVIDENCE');}
+  }
+}
 export function executeProcess(executable,args,prompt,{cwd,timeoutMs=240000}={}){
   return new Promise((resolve,reject)=>{
     const env=Object.fromEntries(Object.entries(process.env).filter(([k])=>!k.startsWith('CF2_')&&!/API_KEY|ACCESS_TOKEN|REFRESH_TOKEN|DATABASE_URL/.test(k)));
     const child=spawn(executable,args,{cwd,env,windowsHide:true,shell:false,stdio:['pipe','pipe','pipe']});let stdout='',stderr='',ended=false;
     const timer=setTimeout(()=>{child.kill();reject(new Error('EXECUTOR_TIMEOUT'));},timeoutMs);
     const add=(which,chunk)=>{if(which==='out')stdout+=chunk;else stderr+=chunk;if(stdout.length+stderr.length>2000000){child.kill();reject(new Error('EXECUTOR_OUTPUT_LIMIT'));}};
-    child.stdout.on('data',c=>add('out',c));child.stderr.on('data',c=>add('err',c));child.on('error',()=>{clearTimeout(timer);reject(new Error('EXECUTOR_UNAVAILABLE'));});child.on('close',code=>{if(ended)return;ended=true;clearTimeout(timer);if(code!==0)return reject(new Error('EXECUTOR_FAILED'));resolve({stdout,stderr_sha256:sha(stderr),exit_code:code});});child.stdin.on('error',()=>{});child.stdin.end(prompt);
+    child.stdout.on('data',c=>add('out',c));child.stderr.on('data',c=>add('err',c));child.on('error',()=>{clearTimeout(timer);reject(new Error('EXECUTOR_UNAVAILABLE'));});child.on('close',code=>{if(ended)return;ended=true;clearTimeout(timer);if(code!==0){const error=new Error('EXECUTOR_FAILED');error.diagnostic={exit_code:code,stdout,stderr_sha256:sha(stderr)};return reject(error);}resolve({stdout,stderr_sha256:sha(stderr),exit_code:code});});child.stdin.on('error',()=>{});child.stdin.end(prompt);
   });
 }
 export class LocalRoleRunner{
@@ -41,7 +48,7 @@ export class LocalRoleRunner{
         let result;
         if(this.actor_id==='ACTOR:CLAUDE_CODE'){
           const run=await executeProcess(this.claude,['-p','--tools','','--setting-sources','','--settings','{"disableAllHooks":true}','--strict-mcp-config','--mcp-config','{"mcpServers":{}}','--output-format','json','--no-session-persistence','--max-turns','2'],prompt,{cwd:this.workdir});
-          const envelope=JSON.parse(run.stdout);if(envelope.is_error)throw new Error('EXECUTOR_FAILED');result=JSON.parse(envelope.result);payload={...result,execution:{runtime:'claude-code',stdout_sha256:sha(run.stdout),exit_code:run.exit_code}};
+          await fs.writeFile(output,run.stdout,'utf8');const envelope=JSON.parse(run.stdout);if(envelope.is_error)throw new Error('EXECUTOR_FAILED');result=parseRoleReport(envelope.result);payload={...result,execution:{runtime:'claude-code',stdout_sha256:sha(run.stdout),exit_code:run.exit_code}};
         }else{
           const run=await executeProcess(this.codex,['exec','--ignore-user-config','--ephemeral','--skip-git-repo-check','--sandbox','read-only','--color','never','-c','features.shell_tool=false','-c','features.apply_patch_freeform=false','--output-last-message',output,'-'],prompt,{cwd:this.workdir});
           result=JSON.parse(await fs.readFile(output,'utf8'));payload={...result,execution:{runtime:'codex-role-runtime',stdout_sha256:sha(run.stdout),exit_code:run.exit_code}};
@@ -49,7 +56,7 @@ export class LocalRoleRunner{
         if(!['PASS','OBJECTION'].includes(result.result)||typeof result.summary!=='string'||result.external_effects!==0||!Array.isArray(result.canon_versions)||!result.canon_versions.includes(maestro.metadata.version)||!result.canon_versions.includes(estado.metadata.version))throw new Error('EXECUTOR_INVALID_EVIDENCE');
         payload.canon=[maestro.metadata,estado.metadata];payload.scope='READ_ONLY_CLOSURE_REVIEW';if(result.result==='OBJECTION')type='OBJECTION';
       }
-    }catch(error){type='OBJECTION';payload={result:'BLOCKED',error_code:['CANON_NOT_VERIFIED','RUNTIME_CAPABILITY_UNAVAILABLE','EXECUTOR_UNAVAILABLE','EXECUTOR_FAILED','EXECUTOR_TIMEOUT','EXECUTOR_INVALID_EVIDENCE','ROLE_FORBIDDEN'].includes(error.message)?error.message:'EXECUTOR_FAILED',external_effects:0};}
+    }catch(error){if(error.diagnostic){await fs.mkdir(this.workdir,{recursive:true});await fs.writeFile(path.join(this.workdir,'last-executor-failure.json'),JSON.stringify(error.diagnostic),'utf8');}type='OBJECTION';payload={result:'BLOCKED',error_code:['CANON_NOT_VERIFIED','RUNTIME_CAPABILITY_UNAVAILABLE','EXECUTOR_UNAVAILABLE','EXECUTOR_FAILED','EXECUTOR_TIMEOUT','EXECUTOR_INVALID_EVIDENCE','ROLE_FORBIDDEN'].includes(error.message)?error.message:'EXECUTOR_FAILED',external_effects:0};}
     await this.call('complete',{thread_id:job.thread_id,message_id:job.message_id,lease_token:job.lease_token,type,payload});
     return{processed:true,thread_id:job.thread_id,message_id:job.message_id,result:payload.result,error_code:payload.error_code??null};
   }

@@ -117,3 +117,11 @@ Gaby Chat, Gaby CW and Codex use native Codex subprocesses with fixed role contr
 Actual primary thread THREAD:CANARY:ORCHESTRATION:20260905T0825:REAL closed with 9 messages and all four Claudio counters zero. The first role output had prefixed hashes and was rejected as EXECUTOR_INVALID_EVIDENCE; Diego resolved the objection after the prompt required exact versions. All three native role reviews then returned PASS with exact canon hashes. This history is retained, not rewritten as a clean first attempt.
 
 Operational limits: the host must be awake, OneDrive files available and the Windows user logged in. If disconnected, the gateway fails closed instead of asking Claudio to move content. Credential renewal remains an operational requirement before expiry. The original disabled Windows tasks remain disabled.
+
+### Final local verification
+
+Primary clean canary THREAD:CANARY:ORCHESTRATION:20260905T0832:REAL_CLEAN is CLOSED with 6 messages, all 3 native executions PASS and all four Claudio counters 0. Claude Code canary THREAD:CANARY:ORCHESTRATION:20260905T0842:CLAUDE_FINAL is CLOSED after a native review returned PASS. Its initial parser objection and the earlier cancelled diagnostic thread are retained. Claude's OAuth login requires ordinary headless mode: tools, setting sources, hooks and MCP are disabled explicitly; --bare skips keychain/OAuth and cannot use this existing login. A unique JSON code block is accepted with the same evidence validation as plain JSON; ambiguous blocks fail closed.
+
+Full suite 278/278 PASS. Actual runtime runs through the registered Windows task, which was observed Running with fresh actor/bridge heartbeats after restart. The first immediate stop/start attempt failed; the revised restart waits for the old task to stop. A missing/offline bridge was observed returning CANON_NOT_VERIFIED in production.
+
+Publication of the final corrections is a separate gate from the already live 369bc28 deployment: automatic approval review requested destination-specific authorization for the public user-owned repository. No public push is considered completed without a successful tool result.
