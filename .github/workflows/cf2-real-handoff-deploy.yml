@@ -15,7 +15,7 @@ jobs:
     env:
       RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
       SERVICE_ID: srv-daa8dngae00c73a3m15g
-      TARGET_COMMIT: 6c446a37952949e49e82f4ddc0689ff018d35534
+      TARGET_COMMIT: ${{ github.sha }}
       CORE_URL: https://cf2-prod-core.onrender.com
     steps:
       - name: Verify exact service and deploy exact commit once
