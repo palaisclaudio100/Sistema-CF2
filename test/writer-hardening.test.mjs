@@ -64,5 +64,39 @@ test('OWN-07 Diego acting DGA cannot transition a GABY_CHAT task',async()=>{cons
 test('OWN-08 Diego acting PRODUCTOR_MUSICAL cannot transition a DGA task',async()=>{const store=new Store();store.seed(task());const result=await submit(store,transition('CANCELLED'),'PRODUCTOR_MUSICAL');assert.equal(result.reason_code,'ROLE_FORBIDDEN');assert.equal(store.writes,0);});
 test('OWN-09 Diego acting DGA verifies a DGA task',async()=>{const store=new Store();store.seed(task());store.proof();const result=await submit(store,record());assert.equal(result.accepted,true);assert.equal(store.objects.get('VERIFICATION:TEST:001').verified_by,'ACTOR:DIEGO');});
 test('OWN-10 Diego acting DGA cannot verify a GABY_CHAT task',async()=>{const store=new Store();store.seed({...task(),responsible_role:'GABY_CHAT'});store.proof();const result=await submit(store,record());assert.equal(result.reason_code,'ROLE_FORBIDDEN');assert.equal(store.writes,0);});
-test('OWN-11 non-Diego actors retain own-role enforcement',async()=>{const store=new Store(),chat={actor_id:'ACTOR:GABY_CHAT',allowed_roles:['GABY_CHAT']},own={...task(),responsible_role:'GABY_CHAT'},foreign={...task('TASK:TEST:002'),responsible_role:'DGA'};assert.equal((await api(store).submitRoleCommand({principal:chat,acting_role:'GABY_CHAT',command:create(own)})).accepted,true);const next=create(foreign);next.command_id='COMMAND:TEST:CREATE:002';next.idempotency_key='test-create-002';assert.equal((await api(store).submitRoleCommand({principal:chat,acting_role:'GABY_CHAT',command:next})).reason_code,'ROLE_FORBIDDEN');assert.equal(store.writes,1);});
+test('OWN-11 Gaby Chat retains rejection of unrelated target roles',async()=>{const store=new Store(),chat={actor_id:'ACTOR:GABY_CHAT',allowed_roles:['GABY_CHAT']},own={...task(),responsible_role:'GABY_CHAT'},foreign={...task('TASK:TEST:002'),responsible_role:'PRODUCTOR_MUSICAL'};assert.equal((await api(store).submitRoleCommand({principal:chat,acting_role:'GABY_CHAT',command:create(own)})).accepted,true);const next=create(foreign);next.command_id='COMMAND:TEST:CREATE:002';next.idempotency_key='test-create-002';assert.equal((await api(store).submitRoleCommand({principal:chat,acting_role:'GABY_CHAT',command:next})).reason_code,'ROLE_FORBIDDEN');assert.equal(store.writes,1);});
 test('OWN-12 current DGA CANARY ownership remains accepted',async()=>{const store=new Store(),object=task('TASK:CANARY:OWNERSHIP:001'),command=create(object);command.command_id='COMMAND:CANARY:OWNERSHIP:CREATE:001';command.idempotency_key='canary-ownership-create-001';const result=await submit(store,command);assert.equal(result.accepted,true);assert.equal(result.replay,false);});
+
+test('HANDOFF-01 Chat creates for DGA while authenticated audit identity stays Chat',async()=>{
+  const store=new Store(),submitted=[];const write=store.submitCommand.bind(store);store.submitCommand=async c=>{submitted.push(c);return write(c);};
+  const chat={actor_id:'ACTOR:GABY_CHAT',allowed_roles:['GABY_CHAT']};
+  const result=await api(store).submitRoleCommand({principal:chat,acting_role:'GABY_CHAT',command:create()});
+  assert.equal(result.accepted,true);assert.equal(store.objects.get('TASK:TEST:001').responsible_role,'DGA');
+  assert.equal(submitted[0].actor_id,'ACTOR:GABY_CHAT');assert.equal(submitted[0].actor_role,'GABY_CHAT');
+});
+test('HANDOFF-02 delivery grants no transition or verification rights on the DGA task',async()=>{
+  const store=new Store(),chat={actor_id:'ACTOR:GABY_CHAT',allowed_roles:['GABY_CHAT']};store.seed(task());store.proof();
+  for(const command of [transition('CANCELLED'),record()])assert.equal((await api(store).submitRoleCommand({principal:chat,acting_role:'GABY_CHAT',command})).reason_code,'ROLE_FORBIDDEN');
+  assert.equal(store.writes,0);assert.equal(store.objects.get('TASK:TEST:001').state,'OPEN');
+});
+test('HANDOFF-03 Chat cannot impersonate DGA or address DIEGO as a role',async()=>{
+  const store=new Store(),chat={actor_id:'ACTOR:GABY_CHAT',allowed_roles:['GABY_CHAT','DGA']};
+  assert.equal((await api(store).submitRoleCommand({principal:chat,acting_role:'DGA',command:create()})).reason_code,'ROLE_FORBIDDEN');
+  for(const role of ['DIEGO','ACTOR:DIEGO','CODEX','CLAUDE_CODE','PRODUCTOR_MUSICAL','GABY_CW_DOCUMENTAL','ARBITRARY'])assert.equal((await api(store).submitRoleCommand({principal:chat,acting_role:'GABY_CHAT',command:create({...task(),responsible_role:role})})).reason_code,'ROLE_FORBIDDEN');
+  assert.equal(store.writes,0);
+});
+test('HANDOFF-04 other actors do not gain Chat delivery permission',async()=>{
+  for(const [actor,roles] of Object.entries(MCP_ACTOR_ROLES))if(!['ACTOR:DIEGO','ACTOR:GABY_CHAT'].includes(actor)){
+    const store=new Store();for(const acting_role of roles)assert.equal((await api(store).submitRoleCommand({principal:{actor_id:actor,allowed_roles:roles},acting_role,command:create()})).reason_code,'ROLE_FORBIDDEN');assert.equal(store.writes,0);
+  }
+});
+test('HANDOFF-05 replay is single-write and cannot overwrite an existing owner',async()=>{
+  const store=new Store(),chat={actor_id:'ACTOR:GABY_CHAT',allowed_roles:['GABY_CHAT']};
+  const send=command=>api(store).submitRoleCommand({principal:chat,acting_role:'GABY_CHAT',command});
+  const first=await send(create()),second=await send(create());
+  assert.equal(first.accepted,true);assert.equal(second.replay,true);assert.deepEqual(first.emitted_event_ids,second.emitted_event_ids);assert.equal(store.writes,1);
+  assert.equal((await send({...create(),payload:{object:{...task(),action:'CHANGED'}}})).reason_code,'IDEMPOTENCY_CONFLICT');
+  store.seed({...task('TASK:TEST:EXISTING'),responsible_role:'GABY_CHAT'});
+  assert.equal((await send(create(task('TASK:TEST:EXISTING'),{command_id:'COMMAND:TEST:NEW',idempotency_key:'new-key'}))).reason_code,'OBJECT_ALREADY_EXISTS');
+  assert.equal(store.objects.get('TASK:TEST:EXISTING').responsible_role,'GABY_CHAT');assert.equal(store.writes,1);
+});
