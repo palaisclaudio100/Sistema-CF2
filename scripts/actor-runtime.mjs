@@ -37,7 +37,7 @@ export class LocalRoleRunner{
     await fs.mkdir(this.workdir,{recursive:true});
     const output=path.join(this.workdir,job.message_id.replaceAll(':','_')+'.json');
     if(this.actor_id==='ACTOR:CLAUDE_CODE'){
-      const run=await executeProcess(this.claude,['-p','--tools','','--setting-sources','','--settings','{"disableAllHooks":true}','--strict-mcp-config','--mcp-config','{"mcpServers":{}}','--output-format','json','--no-session-persistence','--max-turns','2'],prompt,{cwd:this.workdir});
+      const run=await executeProcess(this.claude,['-p','--tools','','--setting-sources','','--settings','{"disableAllHooks":true}','--strict-mcp-config','--mcp-config','{"mcpServers":{}}','--output-format','json','--no-session-persistence','--max-turns','2'],prompt,{cwd:this.workdir,timeoutMs:420000});
       await fs.writeFile(output,run.stdout,'utf8');const envelope=JSON.parse(run.stdout);if(envelope.is_error)throw new Error('EXECUTOR_FAILED');
       return{result:parseRoleReport(envelope.result),execution:{runtime:'claude-code-on-demand',exit_code:run.exit_code,stdout_sha256:sha(run.stdout)}};
     }
