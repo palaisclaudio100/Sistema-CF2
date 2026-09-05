@@ -14,10 +14,12 @@ export async function runOrdinary(runner,job){
     const material=await runner.objects.writeValidated(context,fence);
     return{type:'EVIDENCE',payload:{result:'PASS',summary:'Contenido validado escrito fielmente y releído por Gaby CW.',material,canon,scope:'ORDINARY_MATERIAL',execution:{runtime:'scoped-object-writer',exit_code:0}}};
   }
+  const inputVersions=resources.map(r=>({object_id:r.object_id,sha256:r.sha256}));
   const technical=[];
   for(const id of step.command_ids??[])technical.push(await runner.objects.runRegistered(runner.actor_id,id,fence));
   if(step.action==='TECHNICAL_RUN'){
-    for(const resource of resources){if(resource.sha256===null)throw new Error('OBJECT_MISSING');technical.push({action:'READ_HASH_VERIFY',object_id:resource.object_id,sha256:resource.sha256,bytes:resource.bytes,verified_at:resource.verified_at});}
+    for(let i=0;i<resources.length;i++)resources[i]=await runner.objects.snapshot(runner.actor_id,resources[i].object_id);
+    for(const resource of resources){if(resource.sha256===null)throw new Error('OBJECT_MISSING');technical.push({action:'READ_HASH_VERIFY',object_id:resource.object_id,before_sha256:inputVersions.find(v=>v.object_id===resource.object_id)?.sha256??null,sha256:resource.sha256,bytes:resource.bytes,verified_at:resource.verified_at});}
     const material=job.payload.previous_result?.material;
     if(material&&!resources.some(r=>r.object_id===material.object_id&&r.sha256===material.readback_sha256))throw new Error('MATERIAL_VERSION_MISMATCH');
   }

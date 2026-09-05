@@ -1,3 +1,4 @@
+import {runOrdinary} from '../scripts/ordinary-work.mjs';
 import {parseOrdinaryClaudeEnvelope} from '../scripts/actor-runtime.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -58,4 +59,38 @@ test('ordinary Claude accepts native structured reports and rejects command-only
  assert.throws(()=>parseOrdinaryClaudeEnvelope({is_error:false,result:'```powershell\nGet-ChildItem\n```'}),/EXECUTOR_INVALID_EVIDENCE/);
  assert.throws(()=>parseOrdinaryClaudeEnvelope({is_error:true,structured_output:report}),/EXECUTOR_FAILED/);
  assert.throws(()=>parseOrdinaryClaudeEnvelope({is_error:false,structured_output:[]}),/EXECUTOR_INVALID_EVIDENCE/);
+});
+test('a forged validation digest cannot change material bytes',()=>setup(async(store,root)=>{
+ await fs.writeFile(path.join(root,'guide.md'),'original');const c=ctx();c.step.expected_sha256=sha('original');c.validated_document.sha256=sha('different');
+ await assert.rejects(store.writeValidated(c,async()=>{}),/CROSS_ROLE_WRITE_DENIED/);assert.equal(await fs.readFile(path.join(root,'guide.md'),'utf8'),'original');
+}));
+test('corrupt verification counters fail closed without material writes',()=>setup(async(store,root)=>{
+ await fs.mkdir(store.stateRoot,{recursive:true});for(const raw of ['', 'garbage', '-1', 'Infinity']){await fs.writeFile(path.join(store.stateRoot,sha('doc')+'.verification-failures'),raw);await assert.rejects(store.writeValidated(ctx(),async()=>{}),/MATERIAL_VERIFICATION_LOCKED/);}await assert.rejects(fs.stat(path.join(root,'guide.md')),/ENOENT/);
+}));
+test('a change between the before snapshot and backup is never backed up as the prior version',()=>setup(async(store,root)=>{
+ const file=path.join(root,'guide.md');await fs.writeFile(file,'original');const c=ctx();c.step.expected_sha256=sha('original');const snapshot=store.snapshot.bind(store);let calls=0;store.snapshot=async(...args)=>{const result=await snapshot(...args);if(++calls===1)await fs.writeFile(file,'concurrent edit');return result;};
+ await assert.rejects(store.writeValidated(c,async()=>{}),/OBJECT_VERSION_CONFLICT/);assert.equal(await fs.readFile(file,'utf8'),'concurrent edit');await assert.rejects(fs.stat(path.join(store.stateRoot,sha(c.message_id)+'.before')),/ENOENT/);
+}));
+test('an incorrect preserved backup blocks the write and counts the failed verification',()=>setup(async(store,root)=>{
+ await fs.writeFile(path.join(root,'guide.md'),'original');await fs.mkdir(store.stateRoot,{recursive:true});const c=ctx();c.step.expected_sha256=sha('original');await fs.writeFile(path.join(store.stateRoot,sha(c.message_id)+'.before'),'wrong backup');
+ await assert.rejects(store.writeValidated(c,async()=>{}),/MATERIAL_BACKUP_VERIFICATION_FAILED/);assert.equal(await fs.readFile(path.join(root,'guide.md'),'utf8'),'original');assert.equal(await fs.readFile(path.join(store.stateRoot,sha('doc')+'.verification-failures'),'utf8'),'1');
+}));
+test('persistent locks are not stolen using a stale or foreign process id',()=>setup(async(store,root)=>{
+ await fs.mkdir(store.stateRoot,{recursive:true});const file=path.join(store.stateRoot,sha('doc')+'.lock'),held=JSON.stringify({pid:2147483647,message_id:'other'});await fs.writeFile(file,held);
+ await assert.rejects(store.writeValidated(ctx(),async()=>{}),/OBJECT_BUSY/);assert.equal(await fs.readFile(file,'utf8'),held);await assert.rejects(fs.stat(path.join(root,'guide.md')),/ENOENT/);
+}));
+test('CW cannot write a technical object even when a registry mistakenly names it owner',()=>setup(async(store)=>{
+ store.objects.get('doc').kind='technical';await assert.rejects(store.writeValidated(ctx(),async()=>{}),/CROSS_ROLE_WRITE_DENIED/);
+}));
+test('material destinations require explicit readback scope without implicitly granting it',()=>setup(async(store)=>{
+ store.objects.get('doc').readers=[G,X];await assert.rejects(store.writeValidated(ctx(),async()=>{}),/OBJECT_READBACK_SCOPE_REQUIRED/);
+}));
+test('command evidence binds the installed definition and declares output truncation',()=>setup(async(store)=>{
+ const command={actors:[X],executable:'registered-node',args:['fixed-job'],cwd:'fixed-workspace'};store.commands.set('check',command);store.execute=async()=>({exit_code:0,stdout:'x'.repeat(9001),stderr_sha256:sha('')});const r=await store.runRegistered(X,'check',async()=>{});
+ assert.equal(r.definition_sha256,sha(JSON.stringify({executable:command.executable,args:command.args,cwd:command.cwd,pins:[]})));assert.equal(r.stdout_bytes,9001);assert.equal(r.stdout_truncated,true);assert.equal(r.stdout.length,8000);assert.equal(r.stdout_sha256,sha('x'.repeat(9001)));assert.equal(r.stderr_sha256,sha(''));
+}));
+test('technical control rereads after commands and rejects a changed CW material version',async()=>{
+ const step={action:'TECHNICAL_RUN',input_objects:['doc'],command_ids:['check']};let changed=false,reads=0;
+ const runner={actor_id:X,call:async op=>op==='execution_context'?{actor_id:X,ordered_by:D,step}:{metadata:{version:'canon'}},objects:{snapshot:async()=>{reads++;return{object_id:'doc',sha256:sha(changed?'changed':'written'),bytes:7,content:'content'};},runRegistered:async()=>{changed=true;return{command_id:'check',exit_code:0};}},modelReport:async()=>{throw Error('MODEL_MUST_NOT_CERTIFY_STALE_INPUT');}};
+ await assert.rejects(runOrdinary(runner,{thread_id:'t',message_id:'m',lease_token:'l',payload:{previous_result:{material:{object_id:'doc',readback_sha256:sha('written')}}}}),/MATERIAL_VERSION_MISMATCH/);assert.equal(reads,2);
 });
