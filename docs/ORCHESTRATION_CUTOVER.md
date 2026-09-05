@@ -105,3 +105,15 @@ The original Google mirror adapter remains fail-closed without verified Control.
 
 Runtimes and direct-canon end-to-end validation are pending for this stage; the
 previous INCOMPLETE result must not be replaced until live evidence exists.
+
+## Live role execution — 2026-09-05
+
+Direct OneDrive read flow explicitly approved by Claudio: “Sí, autorizo ese flujo de lectura”. Deployment 369bc28acd474aa7976cf6e4fc59c02d14d2f3f4 / dep-dadt058n74is73bfoqi0 is live. Migration 009 adds scoped reverse canon requests and a bridge heartbeat, without another actor or service.
+
+The local Windows scheduled task SistemaCF-Orchestration runs a hidden Node supervisor at user logon, with restart on failure. Worker and bridge credentials are separate, bound server-side, expire after 90 days, and are protected with user DPAPI locally; PostgreSQL stores only their hashes. The provisioning job logs RSA-OAEP encrypted capsules, never plaintext tokens. A temporary Diego credential only controls canary threads and expires after two hours. No secret or canon document is committed here.
+
+Gaby Chat, Gaby CW and Codex use native Codex subprocesses with fixed role contracts, tools disabled and read-only sandbox. Claude Code uses a one-shot native process only for a request originally dispatched by Diego; the bridge/supervisor is not a Claude daemon. All actors fetch their own verified canon extracts. This implementation currently supports CANON_CLOSURE_REVIEW and technical canon incidents only. It does not yet replace ordinary material documentary/audiovisual execution or arbitrary engineering tasks; unsupported requests return a technical objection. Therefore live closure success alone is not evidence of complete role-runtime equivalence.
+
+Actual primary thread THREAD:CANARY:ORCHESTRATION:20260905T0825:REAL closed with 9 messages and all four Claudio counters zero. The first role output had prefixed hashes and was rejected as EXECUTOR_INVALID_EVIDENCE; Diego resolved the objection after the prompt required exact versions. All three native role reviews then returned PASS with exact canon hashes. This history is retained, not rewritten as a clean first attempt.
+
+Operational limits: the host must be awake, OneDrive files available and the Windows user logged in. If disconnected, the gateway fails closed instead of asking Claudio to move content. Credential renewal remains an operational requirement before expiry. The original disabled Windows tasks remain disabled.

@@ -33,7 +33,7 @@ export class DirectCanonGateway{
     if(!ready){await this.onIncident(principal,args.object??'MAESTRO');throw new Error('CANON_NOT_VERIFIED');}
     const request_id=crypto.randomUUID();await this.pool.query('INSERT INTO canon_read_requests(request_id,actor_id,operation,arguments) VALUES($1,$2,$3,$4::jsonb)',[request_id,principal.actor_id,operation,JSON.stringify(args)]);
     const until=Date.now()+this.timeoutMs;
-    while(Date.now()<until){const row=(await this.pool.query('SELECT status,response FROM canon_read_requests WHERE request_id=$1',[request_id])).rows[0];if(row?.status==='DONE'){if(row.response?.error_code)throw new Error(row.response.error_code);return row.response;}await new Promise(r=>setTimeout(r,250));}
+    while(Date.now()<until){const row=(await this.pool.query('SELECT status,response FROM canon_read_requests WHERE request_id=$1',[request_id])).rows[0];if(row?.status==='DONE'){if(row.response?.error_code){if(row.response.error_code==='CANON_NOT_VERIFIED')await this.onIncident(principal,args.object??'MAESTRO');throw new Error(row.response.error_code);}return row.response;}await new Promise(r=>setTimeout(r,250));}
     await this.pool.query("UPDATE canon_read_requests SET status='EXPIRED' WHERE request_id=$1 AND status!='DONE'",[request_id]);await this.onIncident(principal,args.object??'MAESTRO');throw new Error('CANON_NOT_VERIFIED');
   }
   async claim(){
