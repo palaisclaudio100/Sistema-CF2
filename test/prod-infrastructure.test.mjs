@@ -26,6 +26,6 @@ test('production code has no embedded connection string or secret material', () 
 test('production health verifier is non-destructive and requires fail-closed flags', () => {
   const verifier = read('scripts/verify-prod-health.mjs');
   assert.match(verifier, /fetch\(endpoint/);
-  assert.match(verifier, /CF2_PRODUCTION_FLAGS_NOT_FAIL_CLOSED/);
+  assert.match(verifier, /CF2_PRODUCTION_FLAGS_UNEXPECTED/);
   assert.doesNotMatch(verifier, /POST|PUT|PATCH|DELETE/);
 });
