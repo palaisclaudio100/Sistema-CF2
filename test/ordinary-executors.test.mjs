@@ -1,3 +1,4 @@
+import {parseOrdinaryClaudeEnvelope} from '../scripts/actor-runtime.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -49,3 +50,12 @@ test('a prepared receipt recovers a committed write after interruption without r
  await fs.writeFile(path.join(store.stateRoot,sha(c.message_id)+'.json'),JSON.stringify({status:'PREPARED',actor_id:W,object_id:'doc',message_id:c.message_id,before_sha256:null,after_sha256:c.validated_document.sha256,validation_sha256:c.validated_document.sha256,validation_message_id:'validation'}));
  const recovered=await store.writeValidated(c,async()=>{});assert.equal(recovered.status,'COMMITTED');assert.equal(recovered.replayed,true);assert.equal(recovered.readback_sha256,c.validated_document.sha256);
 }));
+
+test('ordinary Claude accepts native structured reports and rejects command-only or error envelopes',()=>{
+ const report={result:'PASS',summary:'Review completed',canon_versions:['a','b'],external_effects:0,findings:[],recommendations:[]};
+ assert.deepEqual(parseOrdinaryClaudeEnvelope({is_error:false,structured_output:report,result:''}),report);
+ assert.deepEqual(parseOrdinaryClaudeEnvelope({is_error:false,result:JSON.stringify(report)}),report);
+ assert.throws(()=>parseOrdinaryClaudeEnvelope({is_error:false,result:'```powershell\nGet-ChildItem\n```'}),/EXECUTOR_INVALID_EVIDENCE/);
+ assert.throws(()=>parseOrdinaryClaudeEnvelope({is_error:true,structured_output:report}),/EXECUTOR_FAILED/);
+ assert.throws(()=>parseOrdinaryClaudeEnvelope({is_error:false,structured_output:[]}),/EXECUTOR_INVALID_EVIDENCE/);
+});
