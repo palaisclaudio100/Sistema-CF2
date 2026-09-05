@@ -1,3 +1,5 @@
+import {ExecutorObjects} from '../src/executor-objects.mjs';
+import {runOrdinary} from './ordinary-work.mjs';
 import {DirectCanonReader} from '../src/direct-canon.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -8,9 +10,9 @@ import {sha} from '../src/actor-transport.mjs';
 // they are never passed to the child, command line, prompt or output logs.
 export const CONTRACTS=Object.freeze({
   'ACTOR:GABY_CHAT':'Gaby Chat: define operational and commercial requirements; review documentary consistency against canon. Do not make artistic/strategic decisions reserved to Claudio. Do not perform material writes.',
-  'ACTOR:GABY_CW':'Gaby CW: audiovisual production and authorized material documentary execution. This runner is restricted to read-only closure review and returns a documentary report; do not claim material writes or production occurred.',
-  'ACTOR:CODEX':'Codex: engineering, infrastructure, security and traceability only. Review the technical closure proof; no musical curation, lyrics or marketing decisions.',
-  'ACTOR:CLAUDE_CODE':'Claude Code: auxiliary engineering exclusively upon Diego dispatch. Review technical evidence and exit. No independent activation, daemon, artistic authority or material changes.'
+  'ACTOR:GABY_CW':'Gaby CW: audiovisual production and authorized material documentary execution. Write only the explicit authorized object with content validated by Gaby Chat. No editorial authority. Audiovisual work only through registered tools and destinations.',
+  'ACTOR:CODEX':'Codex: engineering, infrastructure, security and traceability only. Execute engineering only upon Diego order, through scoped objects and registered technical commands. No musical curation, lyrics or marketing decisions.',
+  'ACTOR:CLAUDE_CODE':'Claude Code: auxiliary engineering exclusively upon Diego dispatch. Perform the assigned auxiliary technical analysis and exit. No system passes, independent activation, daemon, artistic authority, canon writes or final verifications.'
 });
 export function parseRoleReport(text){
   try{return JSON.parse(text);}catch{
@@ -29,14 +31,27 @@ export function executeProcess(executable,args,prompt,{cwd,timeoutMs=240000}={})
   });
 }
 export class LocalRoleRunner{
-  constructor({actor_id,token,baseUrl,codex,claude,workdir,fetchImpl=fetch}){if(!CONTRACTS[actor_id])throw new Error('ROLE_FORBIDDEN');Object.assign(this,{actor_id,token,baseUrl,codex,claude,workdir,fetch:fetchImpl});}
+  constructor({actor_id,token,baseUrl,codex,claude,workdir,objects=[],commands=[],stateRoot,fetchImpl=fetch}){if(!CONTRACTS[actor_id])throw new Error('ROLE_FORBIDDEN');Object.assign(this,{actor_id,token,baseUrl,codex,claude,workdir,fetch:fetchImpl});this.contract=CONTRACTS[actor_id];this.objects=new ExecutorObjects({objects,commands,stateRoot:stateRoot??path.join(workdir,"material-state"),execute:executeProcess});}
   async call(operation,args={}){const r=await this.fetch(`${this.baseUrl}/internal/actor-runtime`,{method:'POST',headers:{Authorization:`Bearer ${this.token}`,'content-type':'application/json'},body:JSON.stringify({operation,args}),signal:AbortSignal.timeout(90000)});const body=await r.json();if(!r.ok||body.result!=='PASS')throw new Error(body.error_code??'TRANSPORT_FAILED');return body.data;}
+  async modelReport(prompt,job,{research=false}={}){
+    await fs.mkdir(this.workdir,{recursive:true});
+    const output=path.join(this.workdir,job.message_id.replaceAll(':','_')+'.json');
+    if(this.actor_id==='ACTOR:CLAUDE_CODE'){
+      const run=await executeProcess(this.claude,['-p','--tools','','--setting-sources','','--settings','{"disableAllHooks":true}','--strict-mcp-config','--mcp-config','{"mcpServers":{}}','--output-format','json','--no-session-persistence','--max-turns','2'],prompt,{cwd:this.workdir});
+      await fs.writeFile(output,run.stdout,'utf8');const envelope=JSON.parse(run.stdout);if(envelope.is_error)throw new Error('EXECUTOR_FAILED');
+      return{result:parseRoleReport(envelope.result),execution:{runtime:'claude-code-on-demand',exit_code:run.exit_code,stdout_sha256:sha(run.stdout)}};
+    }
+    const args=[...(research?['--search']:[]),'exec','--ignore-user-config','--ephemeral','--skip-git-repo-check','--sandbox','read-only','--color','never','-c','features.shell_tool=false','-c','features.apply_patch_freeform=false','--output-last-message',output,'-'];
+    const run=await executeProcess(this.codex,args,prompt,{cwd:this.workdir});
+    return{result:parseRoleReport(await fs.readFile(output,'utf8')),execution:{runtime:'codex-role-runtime',exit_code:run.exit_code,stdout_sha256:sha(run.stdout)}};
+  }
   async once(){
-    await this.call('heartbeat',{runtime:this.actor_id==='ACTOR:CLAUDE_CODE'?'claude-code-on-demand':'codex-role-runtime',version:'orchestration-v1-read-only',status:'READY'});
+    await this.call('heartbeat',{runtime:this.actor_id==='ACTOR:CLAUDE_CODE'?'claude-code-on-demand':'codex-role-runtime',version:'orchestration-v2-ordinary',status:'READY'});
     const job=await this.call('claim');if(!job)return{processed:false};
     let type='RESPONSE',payload;
     try{
-      if(job.payload.operation==='CANON_INCIDENT'){payload={result:'BLOCKED',error_code:'CANON_NOT_VERIFIED',technical_owner:'ACTOR:CODEX',next_action:'Restore the verified operational canon bridge or its local read access; do not ask Claudio to transport files.',external_effects:0};}
+      if(job.payload.operation==='ORDINARY_WORK'){const ordinary=await runOrdinary(this,job);type=ordinary.type;payload=ordinary.payload;}
+      else if(job.payload.operation==='CANON_INCIDENT'){payload={result:'BLOCKED',error_code:'CANON_NOT_VERIFIED',technical_owner:'ACTOR:CODEX',next_action:'Restore the verified operational canon bridge or its local read access; do not ask Claudio to transport files.',external_effects:0};}
       else{
         if(job.payload.operation!=='CANON_CLOSURE_REVIEW'||job.payload.external_effects!==0)throw new Error('RUNTIME_CAPABILITY_UNAVAILABLE');
         if(this.actor_id==='ACTOR:CLAUDE_CODE'&&job.sender!=='ACTOR:DIEGO')throw new Error('ROLE_FORBIDDEN');
@@ -56,7 +71,7 @@ export class LocalRoleRunner{
         if(!['PASS','OBJECTION'].includes(result.result)||typeof result.summary!=='string'||result.external_effects!==0||!Array.isArray(result.canon_versions)||!result.canon_versions.includes(maestro.metadata.version)||!result.canon_versions.includes(estado.metadata.version))throw new Error('EXECUTOR_INVALID_EVIDENCE');
         payload.canon=[maestro.metadata,estado.metadata];payload.scope='READ_ONLY_CLOSURE_REVIEW';if(result.result==='OBJECTION')type='OBJECTION';
       }
-    }catch(error){if(error.diagnostic){await fs.mkdir(this.workdir,{recursive:true});await fs.writeFile(path.join(this.workdir,'last-executor-failure.json'),JSON.stringify(error.diagnostic),'utf8');}type='OBJECTION';payload={result:'BLOCKED',error_code:['CANON_NOT_VERIFIED','RUNTIME_CAPABILITY_UNAVAILABLE','EXECUTOR_UNAVAILABLE','EXECUTOR_FAILED','EXECUTOR_TIMEOUT','EXECUTOR_INVALID_EVIDENCE','ROLE_FORBIDDEN'].includes(error.message)?error.message:'EXECUTOR_FAILED',external_effects:0};}
+    }catch(error){if(error.diagnostic){await fs.mkdir(this.workdir,{recursive:true});await fs.writeFile(path.join(this.workdir,'last-executor-failure.json'),JSON.stringify(error.diagnostic),'utf8');}type='OBJECTION';payload={result:'BLOCKED',error_code:['CANON_NOT_VERIFIED','RUNTIME_CAPABILITY_UNAVAILABLE','EXECUTOR_UNAVAILABLE','EXECUTOR_FAILED','EXECUTOR_TIMEOUT','EXECUTOR_INVALID_EVIDENCE','ROLE_FORBIDDEN','EXECUTOR_SCOPE_DENIED','OBJECT_SCOPE_DENIED','CROSS_ROLE_WRITE_DENIED','OBJECT_VERSION_CONFLICT','MATERIAL_READBACK_FAILED','COMMAND_SCOPE_DENIED','COMMAND_VERSION_CONFLICT','MATERIAL_VERSION_MISMATCH'].includes(error.message)?error.message:'EXECUTOR_FAILED',external_effects:0};}
     await this.call('complete',{thread_id:job.thread_id,message_id:job.message_id,lease_token:job.lease_token,type,payload});
     return{processed:true,thread_id:job.thread_id,message_id:job.message_id,result:payload.result,error_code:payload.error_code??null};
   }

@@ -1,4 +1,5 @@
 import {ACTORS,sha,strict} from './actor-transport.mjs';
+import {validateOrdinaryDispatch,executionContext,validateOrdinaryCompletion} from './executor-policy.mjs';
 const str={type:'string',minLength:1,maxLength:200};
 const obj={type:'object',additionalProperties:true};
 const schema=(properties,required=[])=>({type:'object',properties,required,additionalProperties:false});
@@ -19,21 +20,22 @@ export class OrchestrationApi{
   async call(principal,name,args){
     if(!ACTORS.includes(principal?.actor_id))throw new Error('AUTH_REJECTED');
     if(name.startsWith('canon_'))return this.canon.call(principal,name,args);
-    if(name==='start_workflow')return this.transport.public(await this.transport.start(principal,args));
-    if(name==='send_to_actor')return this.transport.send(principal,args);
+    if(name==='start_workflow'){validateOrdinaryDispatch(principal,args.payload,args.stages);return this.transport.public(await this.transport.start(principal,args));}
+    if(name==='send_to_actor'){if(args.type==='REQUEST')validateOrdinaryDispatch(principal,args.payload,[args.recipient]);return this.transport.send(principal,args);}
     if(name==='read_inbox')return this.transport.inbox(principal,args);
     if(['read_thread','get_thread_status'].includes(name)){strict(args,['thread_id']);return this.transport.read(principal,args.thread_id);}
-    if(name==='reply_to_message')return this.transport.reply(principal,args);
+    if(name==='reply_to_message'){const t=await this.transport.repo.read(args.thread_id);this.transport.check(t,principal);validateOrdinaryCompletion(principal,t,args);return this.transport.reply(principal,args);}
     if(name==='control_workflow')return this.transport.control(principal,args);
     throw new Error('METHOD_NOT_FOUND');
   }
   async authenticateWorker(request){const raw=request.headers.authorization??'';if(!raw.startsWith('Bearer '))return null;const hash=sha(raw.slice(7));let key=this.keys[hash];if(!key&&this.pool){const row=(await this.pool.query('SELECT actor_id,capabilities,expires_at FROM actor_transport_keys WHERE key_hash=$1 AND revoked_at IS NULL AND expires_at>now()',[hash])).rows[0];if(row)key={actor_id:row.actor_id,expires_at:new Date(row.expires_at).toISOString(),canary_only:row.capabilities.includes('canary'),canon_bridge:row.capabilities.includes('canon_bridge')};}if(!key||!ACTORS.includes(key.actor_id)||!Number.isFinite(Date.parse(key.expires_at))||Date.parse(key.expires_at)<=this.clock())return null;return{actor_id:key.actor_id,worker:true,canary_only:key.canary_only===true,canon_bridge:key.canon_bridge===true};}
   async worker(principal,operation,args){
     if(principal.canon_bridge){if(principal.actor_id!=='ACTOR:CODEX')throw new Error('ROLE_FORBIDDEN');if(operation==='canon_claim'){strict(args,[]);await this.pool.query("INSERT INTO canon_bridge_state(singleton,actor_id) VALUES(true,'ACTOR:CODEX') ON CONFLICT(singleton) DO UPDATE SET updated_at=now()");return this.canon.claim();}if(operation==='canon_complete')return this.canon.complete(args);throw new Error('ROLE_FORBIDDEN');}
-    if(principal.canary_only){if(!['start_workflow','read_thread','get_thread_status','control_workflow'].includes(operation)||!args.thread_id?.startsWith('THREAD:CANARY:ORCHESTRATION:'))throw new Error('ROLE_FORBIDDEN');if(operation==='start_workflow'&&(args.payload?.operation!=='CANON_CLOSURE_REVIEW'||args.payload?.external_effects!==0))throw new Error('ROLE_FORBIDDEN');return this.call(principal,operation,args);}
+    if(principal.canary_only){if(!['start_workflow','read_thread','get_thread_status','control_workflow'].includes(operation)||!args.thread_id?.startsWith('THREAD:CANARY:ORCHESTRATION:'))throw new Error('ROLE_FORBIDDEN');if(operation==='start_workflow'){if(args.payload?.operation==='ORDINARY_WORK'){validateOrdinaryDispatch(principal,args.payload,args.stages);for(const step of Object.values(args.payload.steps)){for(const id of [step.object_id,...(step.input_objects??[]),...(step.command_ids??[])].filter(Boolean))if(!id.startsWith('EXECUTOR_ACCEPTANCE:'))throw new Error('ROLE_FORBIDDEN');}}else if(args.payload?.operation!=='CANON_CLOSURE_REVIEW'||args.payload?.external_effects!==0)throw new Error('ROLE_FORBIDDEN');}return this.call(principal,operation,args);}
     if(principal.actor_id==='ACTOR:DIEGO')throw new Error('ROLE_FORBIDDEN');
     if(operation==='claim'){strict(args,[]);return this.transport.claim(principal);}
-    if(operation==='complete')return this.transport.reply(principal,args,{leaseRequired:true});
+    if(operation==='execution_context'){const t=await this.transport.repo.read(args.thread_id);this.transport.check(t,principal);return executionContext(principal,t,args,this.clock());}
+    if(operation==='complete'){const t=await this.transport.repo.read(args.thread_id);this.transport.check(t,principal);validateOrdinaryCompletion(principal,t,args);return this.transport.reply(principal,args,{leaseRequired:true});}
     if(operation==='heartbeat'){strict(args,['runtime','version','status']);if(!['READY','BLOCKED'].includes(args.status)||typeof args.runtime!=='string'||args.runtime.length>100||typeof args.version!=='string'||args.version.length>100)throw new Error('INVALID_SCHEMA');await this.pool.query('INSERT INTO actor_runtime_heartbeats(actor_id,body) VALUES($1,$2::jsonb) ON CONFLICT(actor_id) DO UPDATE SET body=EXCLUDED.body,updated_at=now()',[principal.actor_id,JSON.stringify(args)]);return{accepted:true};}
     if(['canon_identify','canon_search','canon_read','read_thread'].includes(operation))return this.call(principal,operation,args);
     throw new Error('ROLE_FORBIDDEN');
