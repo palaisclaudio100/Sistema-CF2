@@ -6,7 +6,7 @@ export const EXECUTOR_ACTIONS=Object.freeze({
   'ACTOR:CODEX':['TECHNICAL_RUN'],
   'ACTOR:CLAUDE_CODE':['AUXILIARY_REVIEW']
 });
-export const documentDigest=d=>sha(d.mode==='PATCH'?JSON.stringify(d.edits):d.content);
+export const documentDigest=d=>sha(d.mode==='PATCH'?JSON.stringify(d.edits.map(({before,after})=>({before,after}))):d.content);
 export function validDocument(d){return d?.validated===true&&(d.mode==='PATCH'?Array.isArray(d.edits)&&d.edits.length>0&&d.edits.length<=20&&d.edits.every(e=>typeof e.before==='string'&&e.before.length>=10&&typeof e.after==='string')&&JSON.stringify(d.edits).length<=18000:typeof d.content==='string'&&d.content.trim().length>0&&d.content.length<=18000)&&d.sha256===documentDigest(d);}
 const deny=()=>{throw new Error('EXECUTOR_SCOPE_DENIED');};
 const identifier=s=>typeof s==='string'&&s.length>0&&s.length<=200;

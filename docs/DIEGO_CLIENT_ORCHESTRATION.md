@@ -21,3 +21,7 @@ Consultar `get_task` con `task_id` igual al `thread_id` devuelto permite leer el
 Estas variantes llaman exactamente a las mismas operaciones públicas que los tools dedicados. No crean un TASK de otro rol. No aceptan campos adicionales ni identidad del cliente. Un segundo inicio con el mismo thread_id se rechaza sin duplicar trabajo; consultar ese ID antes de reintentar una respuesta incierta. El cierre se rechaza mientras exista trabajo pendiente.
 
 Las pruebas unitarias de este contrato no acreditan aceptación productiva. La regresión sólo puede cerrarse con una invocación desde CF2 Diego autenticado, trabajo ordinario real de Gaby Chat, escritura y relectura de Gaby CW, retorno y cierre desde ese cliente.
+
+## PATCH y reanudación
+
+El digest de un PATCH serializa cada edición en orden fijo before/after, preservando el orden de las ediciones. Así el almacenamiento JSONB no invalida contenido idéntico por reordenar claves. Cambiar before o after continúa invalidando la firma del contenido. RESOLVE_OBJECTION conserva el payload del REQUEST anterior de la etapa, incluida la referencia server-side a la respuesta validada de Gaby Chat. La reanudación no reemplaza esa aprobación por datos enviados en la resolución. EXECUTOR_SCOPE_DENIED se devuelve como defecto de alcance identificable.

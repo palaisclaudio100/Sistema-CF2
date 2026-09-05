@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {RemoteMcpServer,MCP_ACTOR_ROLES} from '../src/remote-mcp.mjs';
 import {ActorTransport} from '../src/actor-transport.mjs';
 import {OrchestrationApi,orchestrationTools} from '../src/orchestration-api.mjs';
+import {documentDigest,validDocument,executionContext} from '../src/executor-policy.mjs';
 
 const D='ACTOR:DIEGO',G='ACTOR:GABY_CHAT',C='ACTOR:GABY_CW';
 function fixture(){
@@ -78,4 +79,28 @@ test('ordinary executor policy still rejects cross-role actions through either p
   assert.equal((await f.call('start_workflow',invalid)).result,'FAIL_CLOSED');
   assert.equal((await f.call('submit_task_command',command('START_WORKFLOW',invalid))).result,'FAIL_CLOSED');
   assert.equal((await f.call('get_task',{task_id:start.thread_id})).error_code,'THREAD_UNKNOWN');
+});
+
+test('PATCH validation survives JSONB object key reordering but detects content changes',()=>{
+  const original={mode:'PATCH',validated:true,edits:[{before:'unique existing heading',after:'reviewed new heading'}]};
+  original.sha256=documentDigest(original);
+  const stored={...original,edits:original.edits.map(e=>({after:e.after,before:e.before}))};
+  assert.equal(validDocument(stored),true);
+  stored.edits[0].after+=' tampered';assert.equal(validDocument(stored),false);
+});
+
+test('Diego resolves a material-stage objection without losing the authenticated Chat validation',async()=>{
+  const f=fixture(),payload={operation:'ORDINARY_WORK',brief:'Unit review',source_reference:'TEST',steps:{[G]:{action:'ANALYZE_DRAFT_VALIDATE',object_id:'GUIDE'},[C]:{action:'WRITE_VALIDATED',object_id:'GUIDE',expected_sha256:null}}};
+  let t=(await f.call('submit_task_command',command('START_WORKFLOW',{...start,payload}))).workflow;
+  const document={object_id:'GUIDE',mode:'PATCH',validated:true,edits:[{before:'unique existing heading',after:'reviewed new heading'}]};document.sha256=documentDigest(document);
+  t=await f.transport.reply({actor_id:G},{thread_id:t.thread_id,message_id:t.messages[0].message_id,type:'RESPONSE',payload:{result:'PASS',document,canon:[{},{}]}});
+  const chatResponse=t.messages.find(m=>m.sender===G),cwRequest=t.messages.find(m=>m.recipient===C);
+  await f.transport.reply({actor_id:C},{thread_id:t.thread_id,message_id:cwRequest.message_id,type:'OBJECTION',payload:{error_code:'EXECUTOR_SCOPE_DENIED'}});
+  t=(await f.call('submit_task_command',command('CONTROL_WORKFLOW',{thread_id:t.thread_id,operation:'RESOLVE_OBJECTION',payload:{technical_correction:'Stable patch digest deployed'}}))).workflow;
+  const retry=t.messages.at(-1);
+  assert.equal(retry.payload.previous_response,chatResponse.message_id);assert.equal(retry.sender,D);
+  retry.state='RUNNING';retry.lease_token='test-lease';retry.lease_until=Date.now()+10000;
+  const context=executionContext({actor_id:C},t,{thread_id:t.thread_id,message_id:retry.message_id,lease_token:retry.lease_token});
+  assert.equal(context.validated_document.validation_message_id,chatResponse.message_id);
+  assert.equal(context.validated_document.sha256,document.sha256);
 });
