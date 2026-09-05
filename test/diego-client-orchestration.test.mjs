@@ -11,7 +11,9 @@ function fixture(){
   const repo={
     async create(t){if(rows.has(t.thread_id))throw new Error('THREAD_ALREADY_EXISTS');rows.set(t.thread_id,structuredClone(t));return t;},
     async read(id){return structuredClone(rows.get(id));},
-    async change(id,fn){const t=await fn(await this.read(id));rows.set(id,structuredClone(t));return t;}
+    async change(id,fn){const t=await fn(await this.read(id));rows.set(id,structuredClone(t));return t;},
+    async list(actor_id,limit=100){return [...rows.values()].filter(t=>t.participants.includes(actor_id)).slice(0,limit).map(value=>structuredClone(value));},
+    async pending(actor_id){return [...rows.values()].filter(t=>t.messages.some(m=>m.recipient===actor_id&&m.type==='REQUEST'&&['PENDING','RUNNING'].includes(m.state))).map(value=>structuredClone(value));}
   };
   let actor=D,legacyCalls=0;
   const pool={query:async()=>({rows:[{actor_id:actor}]})};
@@ -72,6 +74,18 @@ test('workflow read preserves participation ACL and rejects an early close or du
   const names=(await f.rpc('tools/list',{},G)).tools.map(t=>t.name);
   assert.equal(names.includes('control_workflow'),false);
   assert.deepEqual(MCP_ACTOR_ROLES[D],['DGA','PRODUCTOR_MUSICAL']);
+});
+
+test('executor MCP surfaces publish thread discovery and immutable replies without activation or cross-role dispatch',async()=>{
+  const f=fixture(),names=(await f.rpc('tools/list',{},G)).tools.map(t=>t.name);
+  assert.deepEqual(names.slice(-4),['read_inbox','read_thread','reply_to_message','get_thread_status']);
+  const accepted=await f.call('submit_task_command',command('START_WORKFLOW',start));
+  const inbox=await f.call('read_inbox',{limit:10},G);assert.ok(Array.isArray(inbox),JSON.stringify(inbox));const request=inbox.find(m=>m.recipient===G&&m.type==='REQUEST');
+  assert.ok(request);assert.equal((await f.call('read_thread',{thread_id:start.thread_id},G)).participants.includes(G),true);
+  const reply=await f.call('reply_to_message',{thread_id:start.thread_id,message_id:request.message_id,type:'RESPONSE',payload:{result:'PASS'}},G);
+  assert.equal(reply.messages.find(m=>m.reply_to===request.message_id).sender,G);
+  assert.equal((await f.call('submit_task_command',command('START_WORKFLOW',{...start,thread_id:'THREAD:TEST:EXECUTOR_NO_ACTIVATION'}),G)).error_code,'ROLE_FORBIDDEN');
+  assert.equal(accepted.accepted,true);
 });
 
 test('ordinary executor policy still rejects cross-role actions through either published entry point',async()=>{

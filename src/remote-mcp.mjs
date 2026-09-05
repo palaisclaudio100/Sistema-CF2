@@ -37,9 +37,11 @@ export const resourceActor=(baseUrl,resource)=>{
 export const validRedirectUri=value=>{try{const uri=new URL(value),transport=uri.protocol==='https:'||(uri.protocol==='http:'&&['127.0.0.1','localhost','[::1]'].includes(uri.hostname));return transport&&!uri.hash&&!uri.username&&!uri.password;}catch{return false;}};
 
 const workflowCommands=Object.freeze({START_WORKFLOW:'start_workflow',CONTROL_WORKFLOW:'control_workflow'});
+const executorThreadTools=Object.freeze(new Set(['read_inbox','read_thread','reply_to_message','get_thread_status']));
 export function mcpToolsFor(principal,{orchestration=false}={}){
   const schemas=writerSchemasForRoles(principal?.allowed_roles);
   const diegoOrchestration=orchestration&&principal?.actor_id==='ACTOR:DIEGO';
+  const executorOrchestration=orchestration&&['ACTOR:GABY_CHAT','ACTOR:GABY_CW'].includes(principal?.actor_id);
   const taskSchema=structuredClone(schemas.submit_task_command);
   if(diegoOrchestration)for(const [command_type,name] of Object.entries(workflowCommands))taskSchema.properties.command.oneOf.push({type:'object',additionalProperties:false,required:['command_type','payload'],properties:{command_type:{const:command_type},payload:orchestrationTools.find(tool=>tool.name===name).inputSchema}});
   const tools=[
@@ -49,7 +51,8 @@ export function mcpToolsFor(principal,{orchestration=false}={}){
     ...(['ACTOR:CODEX','ACTOR:CLAUDE_CODE'].includes(principal?.actor_id)?[]:[Object.freeze({name:'submit_verification',description:'Submit a VERIFICATION through the server-side CF2 RoleInterface. actor_id, actor_role, issued_at, and verified_by are bound server-side.',inputSchema:schemas.submit_verification})]),
     Object.freeze({name:'get_status',description:'Read the status of a submitted CF2 command.',inputSchema:{type:'object',properties:{command_id:{type:'string',minLength:1,maxLength:200}},required:['command_id'],additionalProperties:false}})
   ];
-  return Object.freeze([...tools,...(diegoOrchestration?orchestrationTools:[])]);
+  const publishedOrchestration=diegoOrchestration?orchestrationTools:(executorOrchestration?orchestrationTools.filter(tool=>executorThreadTools.has(tool.name)):[]);
+  return Object.freeze([...tools,...publishedOrchestration]);
 }
 
 export class RemoteMcpServer{
