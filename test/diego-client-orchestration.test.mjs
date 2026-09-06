@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {RemoteMcpServer,MCP_ACTOR_ROLES} from '../src/remote-mcp.mjs';
+import {RemoteMcpServer,MCP_ACTOR_ROLES,diegoStartWorkflowTool} from '../src/remote-mcp.mjs';
 import {ActorTransport} from '../src/actor-transport.mjs';
 import {OrchestrationApi,orchestrationTools} from '../src/orchestration-api.mjs';
 import {documentDigest,validDocument,executionContext} from '../src/executor-policy.mjs';
@@ -20,7 +20,7 @@ function fixture(){
   let actor=D,legacyCalls=0;
   const pool={query:async()=>({rows:[{actor_id:actor}]})};
   const transport=new ActorTransport(repo),orchestration=new OrchestrationApi(transport,{});
-  const server=new RemoteMcpServer({pool,getObject:async id=>id==='TASK:EXECUTION:DISCOVERY'?{id,type:'TASK',state:'OPEN',responsible_role:'DGA'}:null},{baseUrl:'https://cf2.example',orchestration,roleInterface:{submitRoleCommand:async()=>{legacyCalls++;return{accepted:false,reason_code:'ROLE_FORBIDDEN'};}}});
+  const server=new RemoteMcpServer({pool,getObject:async id=>['TASK:EXECUTION:DISCOVERY','TASK:BOT:CODEX'].includes(id)?{id,type:'TASK',state:'OPEN',responsible_role:'DGA'}:null},{baseUrl:'https://cf2.example',orchestration,roleInterface:{submitRoleCommand:async()=>{legacyCalls++;return{accepted:false,reason_code:'ROLE_FORBIDDEN'};}}});
   async function rpc(method,params={},as=D){
     actor=as;let body;
     const response={writeHead(){return this;},end(value){body=value;}};
@@ -35,11 +35,26 @@ const command=(type,payload)=>({acting_role:'DGA',command:{command_type:type,pay
 
 test('configured Diego MCP tools/list publishes callable orchestration and the compatible public command schemas',async()=>{
   const f=fixture(),tools=(await f.rpc('tools/list')).tools;
-  for(const tool of orchestrationTools)assert.deepEqual(tools.find(t=>t.name===tool.name),tool);
+  for(const tool of orchestrationTools.filter(tool=>tool.name!=='start_workflow'))assert.deepEqual(tools.find(t=>t.name===tool.name),tool);
+  assert.deepEqual(tools.find(t=>t.name==='start_workflow'),diegoStartWorkflowTool);
   const variants=tools.find(t=>t.name==='submit_task_command').inputSchema.properties.command.oneOf;
   assert.deepEqual(variants.map(v=>v.properties.command_type.const),['CREATE_TASK','TRANSITION_TASK','START_WORKFLOW','CONTROL_WORKFLOW']);
-  const result=await f.call('start_workflow',start);
-  assert.equal(result.initiator,D);assert.equal(result.messages[0].recipient,G);
+});
+
+test('Diego typed start_workflow creates one BotCodex request and replays idempotently',async()=>{
+  const f=fixture(),args={task_id:'TASK:BOT:CODEX',destination_actor:'ACTOR:CODEX',message_type:'TASK_REQUEST',operation:'READ_ONLY_CANARY',instructions:'Acreditar recepción y lectura segura.',source_reference:'DGA:P0:BOT_CODEX',correlation_id:'THREAD:P0:BOT_CODEX:REAL_CLIENT',idempotency_key:'DGA-P0-BOT-CODEX-1'};
+  const first=await f.call('start_workflow',args),replay=await f.call('start_workflow',args);
+  assert.equal(first.initiator,D);assert.equal(first.task_id,args.task_id);assert.equal(first.messages[0].recipient,'ACTOR:CODEX');
+  assert.equal(first.messages[0].payload.instructions,args.instructions);assert.equal(replay.thread_id,first.thread_id);assert.equal(replay.messages.length,1);
+  const collision=await f.call('start_workflow',{...args,instructions:'Contenido diferente'});
+  assert.equal(collision.error_code,'IDEMPOTENCY_CONFLICT');
+});
+
+test('typed start_workflow rejects spoofing, another destination and an unknown task',async()=>{
+  const f=fixture(),base={task_id:'TASK:BOT:CODEX',destination_actor:'ACTOR:CODEX',message_type:'TASK_REQUEST',operation:'READ_ONLY_CANARY',instructions:'Lectura segura.',source_reference:'DGA:P0',correlation_id:'THREAD:P0:BOT_CODEX:NEGATIVE',idempotency_key:'DGA-P0-NEGATIVE'};
+  assert.equal((await f.call('start_workflow',{...base,actor_id:D})).error_code,'INVALID_SCHEMA');
+  assert.equal((await f.call('start_workflow',{...base,destination_actor:G})).error_code,'INVALID_SCHEMA');
+  assert.equal((await f.call('start_workflow',{...base,task_id:'TASK:UNKNOWN'})).error_code,'UNKNOWN_SUBJECT');
 });
 
 test('existing client command starts the same workflow and get_task returns automatic responses and closure',async()=>{
@@ -98,7 +113,6 @@ test('executor MCP surfaces publish thread discovery and immutable replies witho
 
 test('ordinary executor policy still rejects cross-role actions through either published entry point',async()=>{
   const f=fixture(),invalid={...start,payload:{operation:'ORDINARY_WORK',brief:'Invalid cross-role action',source_reference:'TEST',steps:{[G]:{action:'WRITE_VALIDATED'},[C]:{action:'WRITE_VALIDATED',object_id:'TEST',expected_sha256:null}}}};
-  assert.equal((await f.call('start_workflow',invalid)).result,'FAIL_CLOSED');
   assert.equal((await f.call('submit_task_command',command('START_WORKFLOW',invalid))).result,'FAIL_CLOSED');
   assert.equal((await f.call('get_task',{task_id:start.thread_id})).error_code,'THREAD_UNKNOWN');
 });
