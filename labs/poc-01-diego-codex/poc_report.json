@@ -1,0 +1,59 @@
+{
+  "POC_RESULT": "FAIL",
+  "FAIL_REASON": "REQUIRED_CREDENTIAL_NOT_AVAILABLE",
+  "G1_AUTONOMOUS_HANDOFF": "FAIL",
+  "G2_REAL_CODEX_EXECUTION": "FAIL",
+  "G3_AUTOMATIC_RETURN": "FAIL",
+  "G4_CRASH_RECOVERY": "FAIL",
+  "G5_IDEMPOTENCY": "FAIL",
+  "G6_HUMAN_AUTHORITY": "FAIL",
+
+  "GATES_NOTE": "Ningun gate fue ejecutado. Todos figuran FAIL por regla de cierre absoluto (seccion 7): no existe PARTIAL ni NOT_RUN.",
+
+  "CLAUDIO_MANUAL_TRANSPORTS": 0,
+  "CHATGPT_UI_REQUIRED": false,
+  "CODEX_UI_REQUIRED": false,
+
+  "TEMPORAL_WORKFLOW_IDS": [],
+  "CODEX_THREAD_IDS": [],
+  "CODEX_TURN_IDS": [],
+
+  "DIEGO_PLAN_TRACE_IDS": [],
+  "DIEGO_CLOSE_TRACE_IDS": [],
+
+  "DUPLICATE_CODEX_EXECUTIONS": 0,
+
+  "TOTAL_OPENAI_API_USAGE": {
+    "gpt_5_6_sol_calls": 0,
+    "codex_real_turns": 0,
+    "input_tokens": 0,
+    "output_tokens": 0
+  },
+  "ESTIMATED_API_COST_USD": 0,
+  "NEW_PAID_INFRASTRUCTURE_USD": 0,
+  "TOTAL_DURATION": "PT8M (verificacion de entorno; ninguna corrida del workflow)",
+
+  "ENVIRONMENT_CHECK": {
+    "session": "Claude Code remote, contenedor efimero, proxy de salida gestionado",
+    "lab_path": "/home/user/poc01-lab",
+    "lab_is_cf_repo": false,
+    "lab_has_symlinks_to_production": false,
+    "OPENAI_API_KEY_present": false,
+    "codex_auth_json_present": false,
+    "codex_cli_installed": false,
+    "codex_cli_installable_from_npm": true,
+    "temporal_cli_installed": false,
+    "temporal_cli_download_github_releases": "HTTP 403 via proxy (bloqueado)",
+    "docker_daemon_available": false,
+    "api_openai_com_reachable": "HTTP 401 sin credencial (red OK, credencial ausente)",
+    "pypi_reachable": true
+  },
+
+  "ERRORS": [
+    "REQUIRED_CREDENTIAL_NOT_AVAILABLE: no existe OPENAI_API_KEY ni ~/.codex/auth.json en el entorno de la sesion; sin credencial no es posible invocar gpt-5.6-sol (Diego) ni autenticar Codex App Server.",
+    "SECONDARY: la descarga del binario de Temporal CLI desde GitHub Releases devuelve HTTP 403 a traves del proxy de salida, y no hay daemon Docker; un Temporal local habria requerido otra via de instalacion."
+  ],
+  "STOP_REASON": "REQUIRED_CREDENTIAL_NOT_AVAILABLE",
+
+  "VERDICT": "La pareja programatica Diego<->Codex no queda acreditada. No construir el sistema sobre esta arquitectura."
+}
