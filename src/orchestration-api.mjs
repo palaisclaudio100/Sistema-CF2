@@ -35,6 +35,7 @@ export class OrchestrationApi{
     if(principal.actor_id==='ACTOR:DIEGO')throw new Error('ROLE_FORBIDDEN');
     if(operation==='claim'){strict(args,[]);return this.transport.claim(principal);}
     if(operation==='execution_context'){const t=await this.transport.repo.read(args.thread_id);this.transport.check(t,principal);return executionContext(principal,t,args,this.clock());}
+    if(operation==='acknowledge'){const t=await this.transport.repo.read(args.thread_id);this.transport.check(t,principal);return this.transport.reply(principal,{...args,type:'ACK'},{leaseRequired:true});}
     if(operation==='complete'){const t=await this.transport.repo.read(args.thread_id);this.transport.check(t,principal);validateOrdinaryCompletion(principal,t,args);return this.transport.reply(principal,args,{leaseRequired:true});}
     if(operation==='heartbeat'){strict(args,['runtime','version','status']);if(!['READY','BLOCKED'].includes(args.status)||typeof args.runtime!=='string'||args.runtime.length>100||typeof args.version!=='string'||args.version.length>100)throw new Error('INVALID_SCHEMA');await this.pool.query('INSERT INTO actor_runtime_heartbeats(actor_id,body) VALUES($1,$2::jsonb) ON CONFLICT(actor_id) DO UPDATE SET body=EXCLUDED.body,updated_at=now()',[principal.actor_id,JSON.stringify(args)]);return{accepted:true};}
     if(['canon_identify','canon_search','canon_read','read_thread'].includes(operation))return this.call(principal,operation,args);

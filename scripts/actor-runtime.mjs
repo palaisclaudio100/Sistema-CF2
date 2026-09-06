@@ -56,9 +56,15 @@ export class LocalRoleRunner{
   async once(){
     await this.call('heartbeat',{runtime:this.actor_id==='ACTOR:CLAUDE_CODE'?'claude-code-on-demand':'codex-role-runtime',version:'orchestration-v2-ordinary',status:'READY'});
     const job=await this.call('claim');if(!job)return{processed:false};
+    await this.call('acknowledge',{thread_id:job.thread_id,message_id:job.message_id,lease_token:job.lease_token,payload:{received:true,runtime:this.actor_id==='ACTOR:CLAUDE_CODE'?'claude-code-on-demand':'codex-role-runtime'}});
     let type='RESPONSE',payload;
     try{
-      if(job.payload.operation==='ORDINARY_WORK'){const ordinary=await runOrdinary(this,job);type=ordinary.type;payload=ordinary.payload;}
+      if(job.payload.operation==='READ_ONLY_CANARY'){
+        if(this.actor_id!=='ACTOR:CODEX'||job.payload.external_effects!==0)throw new Error('RUNTIME_CAPABILITY_UNAVAILABLE');
+        const observed=await this.call('read_thread',{thread_id:job.thread_id});
+        payload={result:'PASS',canary:'READ_ONLY_CANARY',external_effects:0,read_evidence:{thread_id:observed.thread_id,correlation_id:observed.correlation_id,message_count:observed.messages.length,observed_at:new Date().toISOString()}};
+      }
+      else if(job.payload.operation==='ORDINARY_WORK'){const ordinary=await runOrdinary(this,job);type=ordinary.type;payload=ordinary.payload;}
       else if(job.payload.operation==='CANON_INCIDENT'){payload={result:'BLOCKED',error_code:'CANON_NOT_VERIFIED',technical_owner:'ACTOR:CODEX',next_action:'Restore the verified operational canon bridge or its local read access; do not ask Claudio to transport files.',external_effects:0};}
       else{
         if(job.payload.operation!=='CANON_CLOSURE_REVIEW'||job.payload.external_effects!==0)throw new Error('RUNTIME_CAPABILITY_UNAVAILABLE');
