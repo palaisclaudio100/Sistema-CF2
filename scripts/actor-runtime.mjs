@@ -55,7 +55,7 @@ export class LocalRoleRunner{
   }
   async once(){
     await this.call('heartbeat',{runtime:this.actor_id==='ACTOR:CLAUDE_CODE'?'claude-code-on-demand':'codex-role-runtime',version:'orchestration-v2-ordinary',status:'READY'});
-    const job=await this.call('claim');if(!job)return{processed:false};
+    const job=await this.call(this.actor_id==='ACTOR:CODEX'?'bot_claim':'claim');if(!job)return{processed:false};
     await this.call('acknowledge',{thread_id:job.thread_id,message_id:job.message_id,lease_token:job.lease_token,payload:{received:true,runtime:this.actor_id==='ACTOR:CLAUDE_CODE'?'claude-code-on-demand':'codex-role-runtime'}});
     await this.call('execution_event',{thread_id:job.thread_id,message_id:job.message_id,lease_token:job.lease_token,kind:'PROGRESS',summary:'EXECUTION_STARTED'});
     const executionHeartbeat=setInterval(()=>{void this.call('execution_event',{thread_id:job.thread_id,message_id:job.message_id,lease_token:job.lease_token,kind:'HEARTBEAT',summary:'EXECUTION_ALIVE'}).catch(()=>{});},60000);executionHeartbeat.unref?.();
