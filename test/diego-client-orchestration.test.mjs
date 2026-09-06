@@ -13,12 +13,14 @@ function fixture(){
     async read(id){return structuredClone(rows.get(id));},
     async change(id,fn){const t=await fn(await this.read(id));rows.set(id,structuredClone(t));return t;},
     async list(actor_id,limit=100){return [...rows.values()].filter(t=>t.participants.includes(actor_id)).slice(0,limit).map(value=>structuredClone(value));},
+    async byTask(task_id){return [...rows.values()].filter(t=>t.task_id===task_id).map(value=>structuredClone(value));},
+    async active(){return [...rows.values()].filter(t=>!['CLOSED','CANCELLED'].includes(t.state)).map(value=>structuredClone(value));},
     async pending(actor_id){return [...rows.values()].filter(t=>t.messages.some(m=>m.recipient===actor_id&&m.type==='REQUEST'&&['PENDING','RUNNING'].includes(m.state))).map(value=>structuredClone(value));}
   };
   let actor=D,legacyCalls=0;
   const pool={query:async()=>({rows:[{actor_id:actor}]})};
   const transport=new ActorTransport(repo),orchestration=new OrchestrationApi(transport,{});
-  const server=new RemoteMcpServer({pool},{baseUrl:'https://cf2.example',orchestration,roleInterface:{submitRoleCommand:async()=>{legacyCalls++;return{accepted:false,reason_code:'ROLE_FORBIDDEN'};}}});
+  const server=new RemoteMcpServer({pool,getObject:async id=>id==='TASK:EXECUTION:DISCOVERY'?{id,type:'TASK',state:'OPEN',responsible_role:'DGA'}:null},{baseUrl:'https://cf2.example',orchestration,roleInterface:{submitRoleCommand:async()=>{legacyCalls++;return{accepted:false,reason_code:'ROLE_FORBIDDEN'};}}});
   async function rpc(method,params={},as=D){
     actor=as;let body;
     const response={writeHead(){return this;},end(value){body=value;}};
@@ -53,6 +55,12 @@ test('existing client command starts the same workflow and get_task returns auto
   const closed=await f.call('submit_task_command',command('CONTROL_WORKFLOW',{thread_id:start.thread_id,operation:'CLOSE'}));
   assert.equal(closed.workflow.state,'CLOSED');
   assert.equal((await f.call('get_task',{task_id:start.thread_id})).workflow.state,'CLOSED');
+});
+
+test('Diego discovers execution and thread from a TASK id alone',async()=>{
+  const f=fixture(),thread=await f.transport.start({actor_id:D},{thread_id:'THREAD:EXECUTION:DISCOVERY',stages:[G],task_id:'TASK:EXECUTION:DISCOVERY',payload:{operation:'READ_ONLY_CANARY',external_effects:0}});
+  const execution=(await f.call('get_task',{task_id:'TASK:EXECUTION:DISCOVERY'})).execution;
+  assert.equal(execution.thread_id,thread.thread_id);assert.equal(execution.execution_state??execution.state,'NOT_STARTED');assert.equal(execution.actor_id,G);
 });
 
 test('workflow command rejects actor spoofing, wrong acting role and unauthorized actors before mutation',async()=>{

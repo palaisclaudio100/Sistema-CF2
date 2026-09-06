@@ -57,6 +57,8 @@ export class LocalRoleRunner{
     await this.call('heartbeat',{runtime:this.actor_id==='ACTOR:CLAUDE_CODE'?'claude-code-on-demand':'codex-role-runtime',version:'orchestration-v2-ordinary',status:'READY'});
     const job=await this.call('claim');if(!job)return{processed:false};
     await this.call('acknowledge',{thread_id:job.thread_id,message_id:job.message_id,lease_token:job.lease_token,payload:{received:true,runtime:this.actor_id==='ACTOR:CLAUDE_CODE'?'claude-code-on-demand':'codex-role-runtime'}});
+    await this.call('execution_event',{thread_id:job.thread_id,message_id:job.message_id,lease_token:job.lease_token,kind:'PROGRESS',summary:'EXECUTION_STARTED'});
+    const executionHeartbeat=setInterval(()=>{void this.call('execution_event',{thread_id:job.thread_id,message_id:job.message_id,lease_token:job.lease_token,kind:'HEARTBEAT',summary:'EXECUTION_ALIVE'}).catch(()=>{});},60000);executionHeartbeat.unref?.();
     let type='RESPONSE',payload;
     try{
       if(job.payload.operation==='READ_ONLY_CANARY'){
@@ -85,7 +87,9 @@ export class LocalRoleRunner{
         if(!['PASS','OBJECTION'].includes(result.result)||typeof result.summary!=='string'||result.external_effects!==0||!Array.isArray(result.canon_versions)||!result.canon_versions.includes(maestro.metadata.version)||!result.canon_versions.includes(estado.metadata.version))throw new Error('EXECUTOR_INVALID_EVIDENCE');
         payload.canon=[maestro.metadata,estado.metadata];payload.scope='READ_ONLY_CLOSURE_REVIEW';if(result.result==='OBJECTION')type='OBJECTION';
       }
-    }catch(error){if(error.diagnostic){await fs.mkdir(this.workdir,{recursive:true});await fs.writeFile(path.join(this.workdir,'last-executor-failure.json'),JSON.stringify(error.diagnostic),'utf8');}type='OBJECTION';payload={result:'BLOCKED',error_code:['CANON_NOT_VERIFIED','RUNTIME_CAPABILITY_UNAVAILABLE','EXECUTOR_UNAVAILABLE','EXECUTOR_FAILED','EXECUTOR_TIMEOUT','EXECUTOR_INVALID_EVIDENCE','ROLE_FORBIDDEN','EXECUTOR_SCOPE_DENIED','OBJECT_SCOPE_DENIED','CROSS_ROLE_WRITE_DENIED','OBJECT_VERSION_CONFLICT','MATERIAL_READBACK_FAILED','MATERIAL_BACKUP_VERIFICATION_FAILED','MATERIAL_ROLLBACK_FAILED','MATERIAL_VERIFICATION_LOCKED','OBJECT_BUSY','OBJECT_READBACK_SCOPE_REQUIRED','COMMAND_SCOPE_DENIED','COMMAND_VERSION_CONFLICT','MATERIAL_VERSION_MISMATCH'].includes(error.message)?error.message:'EXECUTOR_FAILED',external_effects:0};}
+    }catch(error){if(error.diagnostic){await fs.mkdir(this.workdir,{recursive:true});await fs.writeFile(path.join(this.workdir,'last-executor-failure.json'),JSON.stringify(error.diagnostic),'utf8');}type='OBJECTION';payload={result:'BLOCKED',error_code:['CANON_NOT_VERIFIED','RUNTIME_CAPABILITY_UNAVAILABLE','EXECUTOR_UNAVAILABLE','EXECUTOR_FAILED','EXECUTOR_TIMEOUT','EXECUTOR_INVALID_EVIDENCE','ROLE_FORBIDDEN','EXECUTOR_SCOPE_DENIED','OBJECT_SCOPE_DENIED','CROSS_ROLE_WRITE_DENIED','OBJECT_VERSION_CONFLICT','MATERIAL_READBACK_FAILED','MATERIAL_BACKUP_VERIFICATION_FAILED','MATERIAL_ROLLBACK_FAILED','MATERIAL_VERIFICATION_LOCKED','OBJECT_BUSY','OBJECT_READBACK_SCOPE_REQUIRED','COMMAND_SCOPE_DENIED','COMMAND_VERSION_CONFLICT','MATERIAL_VERSION_MISMATCH'].includes(error.message)?error.message:'EXECUTOR_FAILED',external_effects:0};await this.call('execution_event',{thread_id:job.thread_id,message_id:job.message_id,lease_token:job.lease_token,kind:'BLOCKED',summary:payload.error_code});}
+    clearInterval(executionHeartbeat);
+    await this.call('execution_event',{thread_id:job.thread_id,message_id:job.message_id,lease_token:job.lease_token,kind:'FINISHED',summary:type==='RESPONSE'?'EXECUTION_FINISHED':'EXECUTION_BLOCKED'});
     await this.call('complete',{thread_id:job.thread_id,message_id:job.message_id,lease_token:job.lease_token,type,payload});
     return{processed:true,thread_id:job.thread_id,message_id:job.message_id,result:payload.result,error_code:payload.error_code??null};
   }
