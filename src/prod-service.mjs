@@ -13,7 +13,7 @@ import {RemoteMcpServer} from './remote-mcp.mjs';
 import {OutboxConsumer} from './outbox-consumer.mjs';
 
 const enabled=value=>value==='true';
-const config = Object.freeze({ release_id: process.env.CF2_RELEASE_ID, database_url: process.env.CF2_DATABASE_URL ?? process.env.DATABASE_URL, port: Number(process.env.PORT ?? 10000), production_cutover_enabled: enabled(process.env.CF2_PRODUCTION_WRITER_ENABLED), external_adapters_enabled: false, role_cutover_enabled: enabled(process.env.CF2_ROLE_CUTOVER_ENABLED), oidc:{repository:process.env.CF2_OIDC_REPOSITORY,repositoryId:process.env.CF2_OIDC_REPOSITORY_ID,workflowRef:process.env.CF2_OIDC_WORKFLOW_REF,ref:process.env.CF2_OIDC_REF,audience:CUTOVER_AUDIENCE} });
+const config = Object.freeze({ release_id: process.env.RENDER_GIT_COMMIT ?? process.env.CF2_RELEASE_ID, database_url: process.env.CF2_DATABASE_URL ?? process.env.DATABASE_URL, port: Number(process.env.PORT ?? 10000), production_cutover_enabled: enabled(process.env.CF2_PRODUCTION_WRITER_ENABLED), external_adapters_enabled: false, role_cutover_enabled: enabled(process.env.CF2_ROLE_CUTOVER_ENABLED), oidc:{repository:process.env.CF2_OIDC_REPOSITORY,repositoryId:process.env.CF2_OIDC_REPOSITORY_ID,workflowRef:process.env.CF2_OIDC_WORKFLOW_REF,ref:process.env.CF2_OIDC_REF,audience:CUTOVER_AUDIENCE} });
 if (!config.release_id || !config.database_url) throw new Error('CF2_RELEASE_ID_AND_DATABASE_URL_REQUIRED');
 const databaseHost = new URL(config.database_url).hostname;
 // Render's private PostgreSQL endpoint uses a service-local self-signed CA. TLS
