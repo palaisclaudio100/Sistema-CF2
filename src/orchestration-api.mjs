@@ -5,10 +5,10 @@ const obj={type:'object',additionalProperties:true};
 const schema=(properties,required=[])=>({type:'object',properties,required,additionalProperties:false});
 export const orchestrationTools=[
   ['start_workflow','Persist a workflow; multi-actor dispatch and Claude Code activation require Diego.',schema({thread_id:str,payload:obj,stages:{type:'array',items:{enum:ACTORS},minItems:1,maxItems:20},task_id:str,command_id:str},['thread_id','payload','stages'])],
-  ['send_to_actor','Send a typed message on an authorized thread; sender is server-bound.',schema({thread_id:str,recipient:{enum:ACTORS},type:{enum:['REQUEST','RESPONSE','OBJECTION','DECISION','EVIDENCE','ACK']},payload:obj,idempotency_key:str,task_id:str,command_id:str},['thread_id','recipient','type','payload','idempotency_key'])],
+  ['send_to_actor','Send a CF2 Courier envelope on an authorized route; sender is server-bound.',schema({thread_id:str,recipient:{enum:ACTORS},type:{enum:['TASK_REQUEST','RESULT','QUESTION','DECISION_REQUEST','VERIFICATION_REQUEST','ACK','ERROR','REQUEST','RESPONSE','OBJECTION','DECISION','EVIDENCE']},payload:obj,idempotency_key:str,task_id:str,command_id:str},['thread_id','recipient','type','payload','idempotency_key'])],
   ['read_inbox','Read the authenticated actor inbox.',schema({limit:{type:'integer',minimum:1,maximum:100}})],
   ['read_thread','Read an authorized thread and its audit trail.',schema({thread_id:str},['thread_id'])],
-  ['reply_to_message','Return to the immutable original sender and thread.',schema({thread_id:str,message_id:str,type:{enum:['RESPONSE','OBJECTION','EVIDENCE','ACK']},payload:obj},['thread_id','message_id','type','payload'])],
+  ['reply_to_message','Acknowledge or return a CF2 Courier envelope to its immutable original sender and thread.',schema({thread_id:str,message_id:str,type:{enum:['RESULT','ACK','ERROR','RESPONSE','OBJECTION','EVIDENCE']},payload:obj},['thread_id','message_id','type','payload'])],
   ['get_thread_status','Read complete authorized workflow state and metrics.',schema({thread_id:str},['thread_id'])],
   ['control_workflow','Diego: close, cancel, resolve an objection or request a reserved Claudio decision.',schema({thread_id:str,operation:{enum:['CLOSE','CANCEL','RESOLVE_OBJECTION','CLAUDIO_DECISION_REQUIRED']},reason:str,payload:obj},['thread_id','operation'])],
   ['canon_identify','Identify current canon objects only through a verified Control.',schema({})],
